@@ -191,13 +191,13 @@ struct cgroup_ctx {
 
 ```
 cgroup_init(conf)
-  ├── 参数校验
-  ├── cgroup_ops_init(conf)        // 探测 cgroup 环境
-  │     ├── 分配 cgroup_ops
-  │     ├── initialize_cgroups()   // 核心探测
-  │     └── 挂载所有回调函数
-  ├── ops->data_init(ops)          // 读取 lxc.cgroup.pattern
-  └── 打印 driver / layout 信息
+  +-- arg check
+  +-- cgroup_ops_init(conf)        // detect cgroup env
+  |     +-- alloc cgroup_ops
+  |     +-- initialize_cgroups()   // core probe
+  |     +-- install callbacks
+  +-- ops->data_init(ops)          // read lxc.cgroup.pattern
+  +-- print driver / layout info
 ```
 
 ### 3.2 环境探测：`initialize_cgroups()`
@@ -328,10 +328,10 @@ ops->criu_escape                  = cgfsng_criu_escape;
 #### 路径确定优先级
 
 ```
-1. conf->cgroup_meta.monitor_dir        （用户显式指定）
+1. conf->cgroup_meta.monitor_dir        (user-specified)
 2. conf->cgroup_meta.dir + "/lxc.monitor." + name + RETRY_SUFFIX
-3. cgroup_pattern 替换 %n + "/lxc.monitor" + RETRY_SUFFIX
-4. "lxc.monitor." + name + RETRY_SUFFIX  （默认）
+3. cgroup_pattern replace %n + "/lxc.monitor" + RETRY_SUFFIX
+4. "lxc.monitor." + name + RETRY_SUFFIX  (default)
 ```
 
 #### 创建与重试
@@ -340,12 +340,12 @@ ops->criu_escape                  = cgfsng_criu_escape;
 for idx = 0 to 999:
     for each hierarchy:
         cgroup_tree_create(hierarchy, monitor_cgroup, NULL, false)
-    if 全部成功:
+    if all succeed:
         break
     else:
-        回滚已创建的（cgroup_tree_prune）
-        修改后缀为 "-1", "-2", ...
-        重试
+        rollback created ones(cgroup_tree_prune)
+        change suffix to "-1", "-2", ...
+        retry
 ```
 
 最多重试 999 次（`idx == 1000` 时报 `ERANGE`），防止名称冲突。
@@ -357,19 +357,19 @@ for idx = 0 to 999:
 #### 路径确定优先级
 
 ```
-1. conf->cgroup_meta.container_dir      （用户显式指定）
-   ├── 有 namespace_dir: limit=container_dir, container=container_dir/namespace_dir
-   └── 无 namespace_dir: limit == container（无隔离）
+1. conf->cgroup_meta.container_dir      (user-specified)
+   +-- with namespace_dir: limit=container_dir, container=container_dir/namespace_dir
+   +-- without namespace_dir: limit == container(no isolation)
 2. conf->cgroup_meta.dir + "/lxc.payload." + name + RETRY_SUFFIX
-3. cgroup_pattern 替换 %n + "/lxc.payload" + RETRY_SUFFIX
-4. "lxc.payload." + name + RETRY_SUFFIX  （默认）
+3. cgroup_pattern replace %n + "/lxc.payload" + RETRY_SUFFIX
+4. "lxc.payload." + name + RETRY_SUFFIX  (default)
 ```
 
 #### Limit vs Container 的两级结构
 
 ```
-/sys/fs/cgroup/.../<limit_cgroup>/          ← 资源限制写在这里
-                    └── <namespace_dir>/    ← 容器进程实际运行在这里
+/sys/fs/cgroup/.../<limit_cgroup>/          <- resource limits here
+                    +-- <namespace_dir>/    <- container procs run here
 ```
 
 这种设计允许：
@@ -422,14 +422,14 @@ for (level = root; level < target; level++) {
 
 ```
 cgroup_exit(ops)
-  ├── 释放所有 hierarchy
-  │     ├── 关闭 dfd_base / dfd_mon / dfd_con / dfd_lim
-  │     ├── 释放 path_mon / path_con / path_lim / at_base
-  │     └── 释放 controllers 数组
-  ├── 关闭 dfd_mnt
-  ├── 释放 cgroup_pattern / monitor_cgroup / container_cgroup
-  ├── 释放 BPF 设备程序（bpf_program）
-  └── 释放 ops 本身
+  +-- free all hierarchies
+  |     +-- close dfd_base / dfd_mon / dfd_con / dfd_lim
+  |     +-- free path_mon / path_con / path_lim / at_base
+  |     +-- free controllers array
+  +-- close dfd_mnt
+  +-- free cgroup_pattern / monitor_cgroup / container_cgroup
+  +-- free BPF device program(bpf_program)
+  +-- free ops itself
 ```
 
 ---

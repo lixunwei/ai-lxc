@@ -112,24 +112,24 @@ AppArmor 后端使用宏模板动态生成容器安全策略。模板定义在 `
 
 ```
 get_apparmor_profile_content(conf)
-  ├── 拼接基础模板 AA_PROFILE_BASE
-  ├── if (allow_nesting):
-  │     └── 追加 AA_PROFILE_NESTING 模板
-  ├── if (aa_can_stack):
-  │     └── 追加 AA_PROFILE_STACKING 模板
-  ├── if (unprivileged):
-  │     └── 追加 AA_PROFILE_UNPRIVILEGED 模板
-  ├── 追加用户自定义原始规则（lxc.apparmor.raw）
-  └── 返回完整 profile 文本
+  +-- Append base template AA_PROFILE_BASE
+  +-- if (allow_nesting):
+  |     `-- Append AA_PROFILE_NESTING template
+  +-- if (aa_can_stack):
+  |     `-- Append AA_PROFILE_STACKING template
+  +-- if (unprivileged):
+  |     `-- Append AA_PROFILE_UNPRIVILEGED template
+  +-- Append user raw rules (lxc.apparmor.raw)
+  `-- Return full profile text
 ```
 
 加载流程（`load_apparmor_profile()`，`apparmor.c:980`）：
 
 ```
 load_apparmor_profile()
-  ├── 通过管道将 profile 文本传给 apparmor_parser
-  ├── apparmor_parser --add --replace --quiet
-  └── 标记 conf->lsm_aa_profile_created = true
+  +-- Send profile text to apparmor_parser via pipe
+  +-- apparmor_parser --add --replace --quiet
+  `-- Mark conf->lsm_aa_profile_created = true
 ```
 
 ### 3.4 Namespace 支持
@@ -154,16 +154,16 @@ load_apparmor_profile()
 
 ```
 apparmor_prepare(ops, conf, lxcpath)
-  1. 确定最终 profile 名称
-     ├── 用户指定了 lxc.apparmor.profile → 使用它
-     └── 未指定 → 使用默认 "generated" 模式
-  2. 检查 allow_incomplete 配置
-     // 当 AppArmor 功能不完整时是否允许降级运行
-  3. 检查 apparmor_parser 版本
-  4. 生成并加载 profile
-  5. 决定 transition 还是 stacking 行为
-     ├── 支持 stacking → 使用 "stack" 模式（多 LSM 共存）
-     └── 不支持 → 使用传统 "transition" 模式
+  1. Decide final profile name
+     +-- User set lxc.apparmor.profile -> use it
+     `-- Not set -> use default "generated" mode
+  2. Check allow_incomplete option
+     // Allow degraded run if AppArmor features are incomplete
+  3. Check apparmor_parser version
+  4. Generate and load profile
+  5. Choose transition or stacking behavior
+     +-- Stacking supported -> use "stack" mode (multi-LSM)
+     `-- Not supported -> use traditional "transition" mode
 ```
 
 ### 3.6 标签应用
@@ -288,22 +288,22 @@ static struct lsm_ops nop_ops = {
 LSM 在容器启动流程中的调用点（`start.c`）：
 
 ```
-容器启动序列:
-  ├── start.c:970   handler->lsm_ops = lsm_init_static()
-  │                  // 选择并初始化 LSM 后端
-  │
-  ├── start.c:1067  handler->lsm_ops->prepare(ops, conf, lxcpath)
-  │                  // 生成/加载安全策略
-  │                  // AppArmor: 生成 profile + apparmor_parser 加载
-  │                  // SELinux: 无操作
-  │
-  ├── start.c:1471  handler->lsm_ops->process_label_set(label, conf, true, false)
-  │                  // 在容器进程 exec 之前应用标签
-  │                  // on_exec=true → 标签在 exec 时生效
-  │
-  └── start.c:1139  handler->lsm_ops->cleanup(ops, conf, lxcpath)
-                     // 清理临时资源
-                     // AppArmor: 清理临时 profile/namespace
+container start sequence:
+  +-- start.c:970   handler->lsm_ops = lsm_init_static()
+  |                  // Select and init the LSM backend
+  |
+  +-- start.c:1067  handler->lsm_ops->prepare(ops, conf, lxcpath)
+  |                  // Generate/load security policy
+  |                  // AppArmor: build profile + load with apparmor_parser
+  |                  // SELinux: no-op
+  |
+  +-- start.c:1471  handler->lsm_ops->process_label_set(label, conf, true, false)
+  |                  // Apply label before container exec
+  |                  // on_exec=true -> label takes effect at exec
+  |
+  `-- start.c:1139  handler->lsm_ops->cleanup(ops, conf, lxcpath)
+                     // Clean temporary resources
+                     // AppArmor: clean temp profile/namespace
 ```
 
 ---

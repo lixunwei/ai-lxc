@@ -8,25 +8,25 @@
 
 ```
 lxc_arguments_parse()
-  ├── build_shortopts()        ← 从 longopts 自动生成 shortopts
-  │
-  ├── getopt_long() 循环
-  │   ├── 公共参数处理：
-  │   │   -n (容器名)
-  │   │   -o (日志文件)
-  │   │   -l (日志级别)
-  │   │   -q (安静模式)
-  │   │   -P (lxcpath)
-  │   │   --rcfile (配置文件)
-  │   │   --help / --version / --usage
-  │   │
-  │   └── args->parser()       ← 各工具自定义选项解析回调
-  │
-  ├── 默认容器名处理：
-  │   └── 未给 -n 时，取第一个剩余参数作为容器名
-  │       （lxc-autostart / lxc-unshare 除外）
-  │
-  └── args->checker()          ← 解析后一致性检查回调
+  +- build_shortopts()        <- auto-build shortopts from longopts
+  |
+  +- getopt_long() loop
+  |  +- common option handling:
+  |  |  -n (container name)
+  |  |  -o (log file)
+  |  |  -l (log level)
+  |  |  -q (quiet mode)
+  |  |  -P (lxcpath)
+  |  |  --rcfile (config file)
+  |  |  --help / --version / --usage
+  |  |
+  |  `- args->parser()       <- per-tool custom option parser
+  |
+  +- default container name handling:
+  |  `- if -n is absent, use first remaining arg as name
+  |     (except lxc-autostart / lxc-unshare)
+  |
+  `- args->checker()          <- post-parse consistency check
 ```
 
 ### 1.2 统一数据结构
@@ -53,18 +53,18 @@ lxc_arguments_parse()
 ### 2.1 lxc-start — 启动容器
 
 ```
-用法: lxc-start -n <name> [options]
+Usage: lxc-start -n <name> [options]
 
-关键选项:
-  -d            后台运行（daemon 模式）
-  -F            前台运行
-  -f <rcfile>   指定配置文件
-  -c <console>  指定控制台输出设备
-  -p <pidfile>  写入 PID 文件
-  -s key=val    定义配置项
-  --share-*     共享 namespace
+Key options:
+  -d            run in background (daemon mode)
+  -F            run in foreground
+  -f <rcfile>   set config file
+  -c <console>  set console output device
+  -p <pidfile>  write PID file
+  -s key=val    define config item
+  --share-*     share namespace
 
-流程: 解析参数 → 加载配置 → c->start()
+Flow: parse args -> load config -> c->start()
 ```
 
 源码位于 `tools/lxc_start.c:36-260`。
@@ -72,17 +72,17 @@ lxc_arguments_parse()
 ### 2.2 lxc-stop — 停止容器
 
 ```
-用法: lxc-stop -n <name> [options]
+Usage: lxc-stop -n <name> [options]
 
-关键选项:
-  -k / --kill     强制杀死
-  --nokill        不发送 kill 信号
-  --nolock        不加锁
-  --nowait        不等待
-  -t <timeout>    超时时间
-  -r / --reboot   重启
+Key options:
+  -k / --kill     force kill
+  --nokill        skip kill signal
+  --nolock        skip locking
+  --nowait        do not wait
+  -t <timeout>    timeout
+  -r / --reboot   reboot
 
-流程: 解析参数 → c->stop() 或 c->shutdown() 或 c->reboot()
+Flow: parse args -> c->stop() or c->shutdown() or c->reboot()
 ```
 
 源码位于 `tools/lxc_stop.c:24-209`。
@@ -90,16 +90,16 @@ lxc_arguments_parse()
 ### 2.3 lxc-create — 创建容器
 
 ```
-用法: lxc-create -n <name> -t <template> [options]
+Usage: lxc-create -n <name> -t <template> [options]
 
-关键选项:
-  -t <template>      模板名（如 download, ubuntu）
-  -B <backingstore>  存储后端（dir/lvm/loop/rbd/zfs/btrfs）
-  --dir <dir>        自定义 rootfs 目录
-  --lvname/--vgname  LVM 相关
-  --fstype/--fssize  文件系统类型和大小
+Key options:
+  -t <template>      template name (e.g. download, ubuntu)
+  -B <backingstore>  storage backend (dir/lvm/loop/rbd/zfs/btrfs)
+  --dir <dir>        custom rootfs dir
+  --lvname/--vgname  LVM related
+  --fstype/--fssize  filesystem type and size
 
-流程: 参数校验 → c->create(template, bdevtype, ...)
+Flow: validate args -> c->create(template, bdevtype, ...)
 ```
 
 源码位于 `tools/lxc_create.c:26-260`。
@@ -107,13 +107,13 @@ lxc_arguments_parse()
 ### 2.4 lxc-destroy — 销毁容器
 
 ```
-用法: lxc-destroy -n <name> [options]
+Usage: lxc-destroy -n <name> [options]
 
-关键选项:
-  -f / --force       强制（先停止再删除）
-  -s / --snapshots   同时删除快照和依赖克隆
+Key options:
+  -f / --force       force (stop before delete)
+  -s / --snapshots   delete snapshots and dependent clones too
 
-流程: 解析参数 → [force: c->stop()] → c->destroy()
+Flow: parse args -> [force: c->stop()] -> c->destroy()
 ```
 
 源码位于 `tools/lxc_destroy.c:25-180`。
@@ -121,19 +121,19 @@ lxc_arguments_parse()
 ### 2.5 lxc-copy — 克隆/复制容器
 
 ```
-用法: lxc-copy -n <name> -N <newname> [options]
+Usage: lxc-copy -n <name> -N <newname> [options]
 
-关键选项:
-  -e / --ephemeral   临时容器
-  -s / --snapshot    快照模式
-  -R / --rename      重命名
-  -B <backingstore>  目标存储后端
-  -m bind=<src:dst>  额外 bind mount
-  -m overlay=<src:dst>  额外 overlay mount
-  --tmpfs            使用 tmpfs
-  --keepname/keepmac/keepdata  保留原有属性
+Key options:
+  -e / --ephemeral   ephemeral container
+  -s / --snapshot    snapshot mode
+  -R / --rename      rename
+  -B <backingstore>  target storage backend
+  -m bind=<src:dst>  extra bind mount
+  -m overlay=<src:dst>  extra overlay mount
+  --tmpfs            use tmpfs
+  --keepname/keepmac/keepdata  keep original attrs
 
-流程: 参数解析 → c->clone() 或 c->rename()
+Flow: parse args -> c->clone() or c->rename()
 ```
 
 源码位于 `tools/lxc_copy.c:53-233`。
@@ -145,18 +145,18 @@ lxc_arguments_parse()
 ### 3.1 lxc-attach — 附着到容器
 
 ```
-用法: lxc-attach -n <name> [-- command]
+Usage: lxc-attach -n <name> [-- command]
 
-关键选项:
-  -e / --elevated-privileges  提升权限
-  -a / --arch                指定架构
-  -s / --namespaces          选择 namespace（如 NETWORK|IPC）
-  --keep-env / --clear-env   环境变量策略
-  -v <var=val>               设置环境变量
-  -u <uid> / -g <gid>        指定用户/组
-  --context <selinux>        SELinux 上下文
+Key options:
+  -e / --elevated-privileges  raise privileges
+  -a / --arch                 set arch
+  -s / --namespaces           choose namespace (e.g. NETWORK|IPC)
+  --keep-env / --clear-env    env strategy
+  -v <var=val>                set env var
+  -u <uid> / -g <gid>         set user/group
+  --context <selinux>         SELinux context
 
-流程: 解析参数 → c->attach() → 两次 fork → setns → exec
+Flow: parse args -> c->attach() -> double fork -> setns -> exec
 ```
 
 源码位于 `tools/lxc_attach.c:65-433`。
@@ -164,13 +164,13 @@ lxc_arguments_parse()
 ### 3.2 lxc-console — 连接控制台
 
 ```
-用法: lxc-console -n <name> [options]
+Usage: lxc-console -n <name> [options]
 
-关键选项:
-  -t <ttynum>   指定 tty 编号
-  -e <prefix>   escape 前缀（默认 Ctrl-a）
+Key options:
+  -t <ttynum>   select tty number
+  -e <prefix>   escape prefix (default Ctrl-a)
 
-流程: 解析参数 → c->console() → mainloop 处理 I/O
+Flow: parse args -> c->console() -> mainloop handles I/O
 ```
 
 源码位于 `tools/lxc_console.c:30-143`。
@@ -178,15 +178,15 @@ lxc_arguments_parse()
 ### 3.3 lxc-execute — 执行模式启动
 
 ```
-用法: lxc-execute -n <name> -- command
+Usage: lxc-execute -n <name> -- command
 
-与 lxc-start 的区别:
-  - 不启动 init 系统
-  - 直接执行指定命令
-  - 使用 lxc.execute.cmd 配置
-  - 支持 uid/gid 指定
+Diff vs lxc-start:
+  - no init system
+  - run target command directly
+  - uses lxc.execute.cmd config
+  - supports uid/gid override
 
-流程: 解析参数 → c->start() 传入 execute 标志
+Flow: parse args -> pass execute flag into c->start()
 ```
 
 源码位于 `tools/lxc_execute.c:31-180`。
@@ -216,18 +216,18 @@ lxc_arguments_parse()
 ### 4.2 lxc-ls — 列出容器
 
 ```
-用法: lxc-ls [options]
+Usage: lxc-ls [options]
 
-关键选项:
-  -1            每行一个
-  -f / --fancy  表格格式
-  -F <columns>  自定义列（NAME,STATE,PID,RAM,SWAP,AUTOSTART,GROUPS,INTERFACE,IPV4,IPV6）
-  --filter <re> 正则过滤
-  --active/--frozen/--running/--stopped  状态过滤
-  -g <groups>   按组过滤
-  --nesting     嵌套显示
+Key options:
+  -1            one per line
+  -f / --fancy  table format
+  -F <columns>  custom columns (NAME,STATE,PID,RAM,SWAP,AUTOSTART,GROUPS,INTERFACE,IPV4,IPV6)
+  --filter <re> regex filter
+  --active/--frozen/--running/--stopped  state filter
+  -g <groups>   filter by group
+  --nesting     nested display
 
-流程: 枚举容器 → 查询信息 → 格式化输出
+Flow: enumerate containers -> query info -> format output
 ```
 
 源码位于 `tools/lxc_ls.c:148-260+`。
@@ -235,13 +235,13 @@ lxc_arguments_parse()
 ### 4.3 lxc-monitor — 状态监控
 
 ```
-用法: lxc-monitor -n <name> [options]
+Usage: lxc-monitor -n <name> [options]
 
-关键选项:
-  -Q / --quit   通知 lxc-monitord 退出
+Key options:
+  -Q / --quit   ask lxc-monitord to exit
 
-流程: 连接 monitord → 循环接收状态变更事件
-      如果 monitord 未运行则自动启动
+Flow: connect to monitord -> receive state-change events in a loop
+      auto-start if monitord is not running
 ```
 
 源码位于 `tools/lxc_monitor.c:34-260`。
@@ -269,11 +269,11 @@ lxc_arguments_parse()
 ### 5.1 lxc-freeze / lxc-unfreeze — 冻结/解冻
 
 ```
-用法: lxc-freeze -n <name>
-      lxc-unfreeze -n <name>
+Usage: lxc-freeze -n <name>
+       lxc-unfreeze -n <name>
 
-流程: c->freeze() 或 c->unfreeze()
-      底层操作 cgroup freezer.state 或 cgroup.freeze
+Flow: c->freeze() or c->unfreeze()
+      backend uses cgroup freezer.state or cgroup.freeze
 ```
 
 ### 5.2 lxc-snapshot — 快照管理
@@ -295,17 +295,17 @@ lxc_arguments_parse()
 ### 5.3 lxc-checkpoint — 检查点/恢复
 
 ```
-用法: lxc-checkpoint -n <name> [options]
+Usage: lxc-checkpoint -n <name> [options]
 
-关键选项:
-  -D <dir>                 检查点目录
-  -r / --restore           恢复模式
-  -s / --stop              检查点后停止
-  -p / --pre-dump          增量预转储
-  --predump-dir <dir>      预转储目录
-  --action-script <script> 动作脚本
+Key options:
+  -D <dir>                 checkpoint dir
+  -r / --restore           restore mode
+  -s / --stop              stop after checkpoint
+  -p / --pre-dump          incremental pre-dump
+  --predump-dir <dir>      pre-dump dir
+  --action-script <script> action script
 
-流程: 参数准备 → 调用 CRIU dump/restore
+Flow: prepare args -> call CRIU dump/restore
 ```
 
 源码位于 `tools/lxc_checkpoint.c:37-220`。
@@ -389,15 +389,15 @@ lxc_arguments_parse()
 `lxc_multicall.c` 实现了 BusyBox 风格的多命令合体二进制（`tools/lxc_multicall.c:31-108`）：
 
 ```
-根据 argv[0] 的名称分发：
-  lxc-start  → lxc_start_main()
-  lxc-stop   → lxc_stop_main()
-  lxc-attach → lxc_attach_main()
+Dispatch by argv[0] name:
+  lxc-start  -> lxc_start_main()
+  lxc-stop   -> lxc_stop_main()
+  lxc-attach -> lxc_attach_main()
   ...
 
-也支持子命令形式：
-  lxc start → lxc_start_main()
-  lxc stop  → lxc_stop_main()
+Also supports subcommand form:
+  lxc start -> lxc_start_main()
+  lxc stop  -> lxc_stop_main()
 ```
 
 ---
@@ -436,28 +436,28 @@ lxc_arguments_parse()
 ### 8.1 主库构建（src/lxc/meson.build）
 
 ```
-liblxc_sources          ← 主静态库的全部源码
-liblxc_ext_sources      ← tools/tests 用的子集源码
+liblxc_sources          <- all source files of main static library
+liblxc_ext_sources      <- subset used by tools/tests
 
-条件编译：
-  want_apparmor  → 追加 apparmor.c
-  want_seccomp   → 追加 seccomp.c
-  want_selinux   → 追加 selinux.c
+Conditional build:
+  want_apparmor  -> add apparmor.c
+  want_seccomp   -> add seccomp.c
+  want_selinux   -> add selinux.c
 ```
 
 ### 8.2 工具构建（tools/meson.build）
 
 ```
 tools_commands_dynamic_link:
-  ├── 各工具单独编译
-  └── 动态链接 liblxc
+  +- build each tool separately
+  `- dynamically link liblxc
 
 lxc-monitor:
-  └── 静态链接 (link_whole: [liblxc_static])
+  `- statically link (link_whole: [liblxc_static])
 
 want_tools_multicall:
-  ├── 所有 lxc_*.c 编成单个 "lxc" 二进制
-  └── 安装 lxc-xxx → lxc 的符号链接
+  +- build all lxc_*.c into one "lxc" binary
+  `- install symlink lxc-xxx -> lxc
 ```
 
 ### 8.3 检查脚本

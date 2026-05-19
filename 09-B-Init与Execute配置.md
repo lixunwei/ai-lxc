@@ -17,8 +17,8 @@ LXC 提供两种容器运行模式：
 **功能**：指定系统容器的 init 进程命令。
 
 ```
-解析：set_config_init_cmd()  →  conf->init_cmd  [set_config_string_item()]
-默认值："/sbin/init"（在 lxccontainer.c 中硬编码）
+Parse: set_config_init_cmd()  -> conf->init_cmd  [set_config_string_item()]
+Default: "/sbin/init" (hard-coded in lxccontainer.c)
 ```
 
 **存储**：`struct lxc_conf` 中的 `char *init_cmd`（`conf.h`）
@@ -27,12 +27,12 @@ LXC 提供两种容器运行模式：
 
 ```
 lxccontainer.c: do_lxcapi_start(c, useinit, argv)
-  ├── if argv == NULL:
-  │     ├── useinit && conf->execute_cmd → 使用 execute_cmd
-  │     ├── conf->init_cmd → 使用 init_cmd
-  │     └── 回退到 "/sbin/init"
-  ├── lxc_string_split_quoted(cmd) → 将命令字符串拆分为 argv[]
-  └── 传递 argv 到 start 引擎
+  +- if argv == NULL:
+  |    +- useinit && conf->execute_cmd -> use execute_cmd
+  |    +- conf->init_cmd -> use init_cmd
+  |    `- fallback to "/sbin/init"
+  +- lxc_string_split_quoted(cmd) -> split command string into argv[]
+  `- pass argv to start engine
 ```
 
 **示例**：
@@ -45,9 +45,9 @@ lxc.init.cmd = /bin/systemd --system
 **功能**：指定 init 进程运行的用户 ID 和组 ID。
 
 ```
-解析：set_config_init_uid() → lxc_safe_uint(value, &conf->init_uid)
-解析：set_config_init_gid() → lxc_safe_uint(value, &conf->init_gid)
-默认值：0（root）
+Parse: set_config_init_uid() -> lxc_safe_uint(value, &conf->init_uid)
+Parse: set_config_init_gid() -> lxc_safe_uint(value, &conf->init_gid)
+Default: 0 (root)
 ```
 
 **存储**：
@@ -56,11 +56,11 @@ lxc.init.cmd = /bin/systemd --system
 
 **运行时应用**（`start.c`）：
 ```
-容器子进程设置：
+Container child setup:
   new_uid = handler->conf->init_uid
   new_gid = handler->conf->init_gid
-  → setgid(new_gid)
-  → setuid(new_uid)
+  -> setgid(new_gid)
+  -> setuid(new_uid)
 ```
 
 ### 2.3 lxc.init.groups
@@ -68,9 +68,9 @@ lxc.init.cmd = /bin/systemd --system
 **功能**：指定 init 进程的附加组列表。
 
 ```
-解析：set_config_init_groups()
-  → 逗号分隔解析每个 GID
-  → 存入 conf->init_groups.list[] 和 conf->init_groups.size
+Parse: set_config_init_groups()
+  -> parse each GID from comma-separated list
+  -> store into conf->init_groups.list[] and conf->init_groups.size
 ```
 
 **存储**：
@@ -94,15 +94,15 @@ else:
 **功能**：指定 init 进程的工作目录。
 
 ```
-解析：set_config_init_cwd() → set_config_path_item(&conf->init_cwd, value)
-默认值：NULL（不改变工作目录）
+Parse: set_config_init_cwd() -> set_config_path_item(&conf->init_cwd, value)
+Default: NULL (do not change working directory)
 ```
 
 **运行时应用**（`start.c`）：
 ```
 if conf->init_cwd:
-    stat(init_cwd) → 检查目录存在
-    如不存在，创建目录（mkdir -p 语义）
+    stat(init_cwd) -> check directory exists
+    create directory if missing (mkdir -p semantics)
     chdir(init_cwd)
 ```
 
@@ -111,7 +111,7 @@ if conf->init_cwd:
 **功能**：指定 lxc-execute 模式下的默认命令。
 
 ```
-解析：set_config_execute_cmd() → set_config_string_item(&conf->execute_cmd, value)
+Parse: set_config_execute_cmd() -> set_config_string_item(&conf->execute_cmd, value)
 ```
 
 **存储**：`char *execute_cmd`，`bool is_execute`（`conf.h:414, 524`）
@@ -124,29 +124,29 @@ if conf->init_cwd:
 
 ```
 lxc-start
-  └── c->start(c, 0, argv)     // useinit = 0
-        └── do_lxcapi_start()
-              ├── 选择 init 命令（见 2.1）
-              └── __lxc_start()
-                    └── lxc_spawn()
-                          └── clone() → 子进程
-                                ├── 设置 UID/GID/CWD/Groups
-                                └── execvp(init_cmd, argv)
+  `- c->start(c, 0, argv)     // useinit = 0
+        `- do_lxcapi_start()
+              +- choose init command (see 2.1)
+              `- __lxc_start()
+                    `- lxc_spawn()
+                          `- clone() -> child process
+                                +- set UID/GID/CWD/Groups
+                                `- execvp(init_cmd, argv)
 ```
 
 ### 3.2 lxc-execute 路径（应用容器）
 
 ```
 lxc-execute
-  └── c->start(c, 1, argv)     // useinit = 1
-        └── do_lxcapi_start()
-              ├── 标记 conf->is_execute = true
-              ├── 选择命令：execute_cmd 优先于 init_cmd
-              └── lxc_execute()          [execute.c]
-                    ├── handler->ops = execute_start_ops
-                    └── __lxc_start()
-                          └── 子进程执行 lxc-init 包装器
-                                └── lxc-init 再 exec 目标程序
+  `- c->start(c, 1, argv)     // useinit = 1
+        `- do_lxcapi_start()
+              +- mark conf->is_execute = true
+              +- choose command: execute_cmd before init_cmd
+              `- lxc_execute()          [execute.c]
+                    +- handler->ops = execute_start_ops
+                    `- __lxc_start()
+                          `- child runs lxc-init wrapper
+                                `- lxc-init then execs target program
 ```
 
 ### 3.3 关键差异
@@ -170,17 +170,17 @@ lxc-execute
 
 ```
 lxc_init main()
-  ├── 解析参数（--name, --logpriority, -- command...）
-  └── lxc_container_init()              [initutils.c]
-        ├── fork()
-        │     └── 子进程：
-        │           ├── setsid()           // 创建新会话
-        │           ├── ioctl(TIOCSCTTY)   // 获取控制终端
-        │           └── execvp(argv[0], argv)
-        └── 父进程（作为 PID 1）：
-              ├── 安装信号处理器
-              ├── 转发信号给子进程
-              └── waitpid() 等待子进程退出
+  +- parse args (--name, --logpriority, -- command...)
+  `- lxc_container_init()              [initutils.c]
+        +- fork()
+        |    `- child:
+        |          +- setsid()           // create new session
+        |          +- ioctl(TIOCSCTTY)   // get controlling tty
+        |          `- execvp(argv[0], argv)
+        `- parent (as PID 1):
+             +- install signal handlers
+             +- forward signals to child
+             `- waitpid() for child exit
 ```
 
 ### 4.2 lxc-init 作为 PID 1 的职责
@@ -216,14 +216,14 @@ lxc-start 按以下顺序加载配置：
 ## 6. 配置到执行的完整数据流
 
 ```
-配置文件                     struct lxc_conf              运行时
-────────                     ───────────────              ──────
-lxc.init.cmd = /bin/bash  →  conf->init_cmd             → execvp("/bin/bash", ...)
-lxc.init.uid = 1000       →  conf->init_uid             → setuid(1000)
-lxc.init.gid = 1000       →  conf->init_gid             → setgid(1000)
-lxc.init.groups = 10,27   →  conf->init_groups          → setgroups([10, 27])
-lxc.init.cwd = /home/user →  conf->init_cwd             → chdir("/home/user")
-lxc.execute.cmd = /app    →  conf->execute_cmd          → lxc-init → execvp("/app")
+Config file                  struct lxc_conf             Runtime
+-----------                  ---------------             -------
+lxc.init.cmd = /bin/bash  -> conf->init_cmd           -> execvp("/bin/bash", ...)
+lxc.init.uid = 1000       -> conf->init_uid           -> setuid(1000)
+lxc.init.gid = 1000       -> conf->init_gid           -> setgid(1000)
+lxc.init.groups = 10,27   -> conf->init_groups        -> setgroups([10, 27])
+lxc.init.cwd = /home/user -> conf->init_cwd           -> chdir("/home/user")
+lxc.execute.cmd = /app    -> conf->execute_cmd        -> lxc-init -> execvp("/app")
 ```
 
 ---

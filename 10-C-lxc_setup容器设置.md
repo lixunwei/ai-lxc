@@ -15,20 +15,20 @@
 
 ```
 lxc_spawn()                                      [start.c]
-  ├── clone() → 子进程
-  │     ├── 等待 START_SYNC_POST_CONFIGURE（父进程完成 cgroup/网络等）
-  │     ├── ★ lxc_setup(handler)                  [start.c:1460-1464]
-  │     ├── LSM 进程标签设置
-  │     ├── PR_SET_NO_NEW_PRIVS
-  │     ├── seccomp 加载
-  │     ├── start 钩子
-  │     └── exec(init_cmd)
-  │
-  └── 父进程：
-        ├── 配置 cgroup
-        ├── 配置网络
-        ├── 发送 START_SYNC_POST_CONFIGURE
-        └── 等待子进程
+  +-- clone() -> child
+  |   +-- wait for START_SYNC_POST_CONFIGURE (parent finished cgroup/network/etc.)
+  |   +-- * lxc_setup(handler)                  [start.c:1460-1464]
+  |   +-- LSM process label setup
+  |   +-- PR_SET_NO_NEW_PRIVS
+  |   +-- seccomp load
+  |   +-- start hook
+  |   `-- exec(init_cmd)
+  |
+  `-- parent:
+      +-- configure cgroup
+      +-- configure network
+      +-- send START_SYNC_POST_CONFIGURE
+      `-- wait for child
 ```
 
 ---
@@ -48,7 +48,7 @@ lxc_rootfs_prepare_child(handler)                [conf.c:3766-3772]
 
 ```c
 lxc_setup_rootfs_prepare_root(handler)           [conf.c:3774-3776]
-  → 辅助函数在 conf.c:3366-3404
+  -> helper in conf.c:3366-3404
 ```
 
 核心操作：
@@ -215,16 +215,16 @@ lxc_finish_devpts_child(handler)                  [conf.c:3872-3874]
 
 ```
 lxc_setup_devpts_child()                          [conf.c:1432-1594]
-  ├── umount2("/dev/pts", MNT_DETACH)            // 卸载旧 devpts
-  ├── mkdirat(dfd_dev, "pts", 0755)              // 创建 pts 目录
-  ├── fsopen("devpts") → fsconfig() → fsmount()  // 新式挂载 API
-  │     options: gid=5, newinstance, ptmxmode=0666,
-  │              mode=0620, max=<pty_max>
-  ├── move_mount() → /dev/pts                    // 移动挂载到位
-  ├── unlinkat(dfd_dev, "ptmx")                  // 删除旧 ptmx
-  ├── mknodat(dfd_dev, "ptmx", ...)              // 创建新 ptmx 设备
-  │   或 symlinkat("pts/ptmx", dfd_dev, "ptmx")  // 或创建符号链接
-  └── 设置正确权限
+  +-- umount2("/dev/pts", MNT_DETACH)            // unmount old devpts
+  +-- mkdirat(dfd_dev, "pts", 0755)              // create pts directory
+  +-- fsopen("devpts") -> fsconfig() -> fsmount() // new mount API
+  |   options: gid=5, newinstance, ptmxmode=0666,
+  |            mode=0620, max=<pty_max>
+  +-- move_mount() -> /dev/pts                    // move mount into place
+  +-- unlinkat(dfd_dev, "ptmx")                  // remove old ptmx
+  +-- mknodat(dfd_dev, "ptmx", ...)              // create new ptmx device
+  |   or symlinkat("pts/ptmx", dfd_dev, "ptmx") // or create symlink
+  `-- set correct permissions
 ```
 
 ### 步骤 19：控制台设置
@@ -248,7 +248,7 @@ lxc_setup_ttys(handler)                           [conf.c:3881-3883]
 
 ```c
 lxc_setup_dev_symlinks(&rootfs)                   [conf.c:3885-3887]
-  → 辅助函数在 conf.c:688-717
+  -> helper in conf.c:688-717
 ```
 
 确保以下标准符号链接存在：
@@ -266,7 +266,7 @@ lxc_setup_dev_symlinks(&rootfs)                   [conf.c:3885-3887]
 
 ```c
 lxc_setup_rootfs_switch_root(&rootfs)             [conf.c:3889-3891]
-  → 辅助函数在 conf.c:1403-1411
+  -> helper in conf.c:1403-1411
 ```
 
 执行最关键的根切换：
@@ -321,50 +321,50 @@ setup_capabilities(lxc_conf)                       // capability 设置
 
 ```
 lxc_setup(handler)
-  │
-  │ ──── 文件系统准备 ────
-  ├─ 1. rootfs 子进程准备
-  ├─ 2. rootfs 挂载（+ pre-mount 钩子）
-  │
-  │ ──── 基本身份 ────
-  ├─ 3. UTS 主机名
-  ├─ 4. 会话密钥环
-  │
-  │ ──── 网络 ────
-  ├─ 5. 接收 veth + 配置网络
-  │
-  │ ──── 设备层 ────
-  ├─ 6. /dev tmpfs 挂载
-  │
-  │ ──── 挂载层（两阶段） ────
-  ├─ 7. 自动挂载 proc/sys
-  ├─ 8. fstab 挂载
-  ├─ 9. 内联挂载条目
-  ├─10. idmapped 挂载同步
-  ├─11. 打开 /dev fd
-  ├─12. 自动挂载 cgroup
-  │
-  │ ──── 钩子与验证 ────
-  ├─13. mount 钩子
-  ├─14. rootfs 覆盖检查
-  ├─15. autodev 钩子 + 设备填充
-  ├─16. 验证 start 钩子存在
-  │
-  │ ──── 终端层 ────
-  ├─17. 临时 procfs
-  ├─18. devpts 设置
-  ├─19. 控制台设置
-  ├─20. TTY 设备创建
-  ├─21. /dev 符号链接
-  │
-  │ ──── 根切换 ────
-  ├─22. pivot_root / chroot
-  ├─23. 共享挂载传播
-  ├─24. boot_id 隔离
-  │
-  │ ──── 进程属性 ────
-  ├─25. CPU 架构
-  └─26. sysctl + proc + rlimit + capabilities
+  |
+  | ---- filesystem prep ----
+  +-- 1. rootfs child prep
+  +-- 2. rootfs mount (+ pre-mount hook)
+  |
+  | ---- base identity ----
+  +-- 3. UTS hostname
+  +-- 4. session keyring
+  |
+  | ---- network ----
+  +-- 5. receive veth + configure network
+  |
+  | ---- device layer ----
+  +-- 6. /dev tmpfs mount
+  |
+  | ---- mount layer (two phases) ----
+  +-- 7. auto-mount proc/sys
+  +-- 8. fstab mount
+  +-- 9. inline mount entries
+  +--10. idmapped mount sync
+  +--11. open /dev fd
+  +--12. auto-mount cgroup
+  |
+  | ---- hooks and checks ----
+  +--13. mount hook
+  +--14. rootfs overmount check
+  +--15. autodev hook + device population
+  +--16. verify start hook exists
+  |
+  | ---- terminal layer ----
+  +--17. temporary procfs
+  +--18. devpts setup
+  +--19. console setup
+  +--20. TTY device creation
+  +--21. /dev symlinks
+  |
+  | ---- root switch ----
+  +--22. pivot_root / chroot
+  +--23. shared mount propagation
+  +--24. boot_id isolation
+  |
+  | ---- process attributes ----
+  +--25. CPU architecture
+  `--26. sysctl + proc + rlimit + capabilities
 ```
 
 ---
@@ -381,15 +381,15 @@ lxc_setup(handler)
 ### 5.1 idmapped 挂载协作
 
 ```
-子进程                              父进程
-  │                                   │
-  ├── 挂载 fstab + entries            │
-  ├── 发送 IDMAPPED_MOUNTS ─────────→│
-  │                                   ├── 创建 detached idmapped 挂载
-  │                                   ├── 通过 SCM_RIGHTS 传递 fd
-  │   ←────────────────────────────── │
-  ├── 接收 fd                         │
-  └── move_mount() 附加到容器         │
+child process                         parent process
+  |                                   |
+  +-- mount fstab + entries           |
+  +-- send IDMAPPED_MOUNTS ---------->|
+  |                                   +-- create detached idmapped mounts
+  |                                   +-- pass fds via SCM_RIGHTS
+  |<----------------------------------+
+  +-- receive fds                     |
+  `-- move_mount() attach to container|
 ```
 
 ---

@@ -178,13 +178,13 @@ union netdev_p {
 
 ```
 nla_begin_nested(nlmsg, IFLA_LINKINFO)
-  ├── 记录当前尾部指针 → attr
-  └── 插入空属性头 { rta_type=IFLA_LINKINFO, rta_len=RTA_HDRLEN }
+  +-- save current tail ptr -> attr
+  +-- insert empty attr hdr { rta_type=IFLA_LINKINFO, rta_len=RTA_HDRLEN }
 
-  ... 在内部添加子属性 ...
+  ... add child attrs inside ...
 
 nla_end_nested(nlmsg, attr)
-  └── attr->rta_len = 当前尾部 - attr起始地址
+  +-- attr->rta_len = current tail - attr start
 ```
 
 ### 2.3 Socket 操作
@@ -201,13 +201,13 @@ nla_end_nested(nlmsg, attr)
 
 ```
 netlink_transaction()
-  ├── netlink_send(request)
-  ├── netlink_rcv(response)
-  └── 检查 response:
-      ├── nlmsg_type == NLMSG_ERROR?
-      │   ├── nlmsgerr.error == 0 → 成功
-      │   └── nlmsgerr.error < 0 → 返回 -errno
-      └── 其他 → 返回原始响应
+  +-- netlink_send(request)
+  +-- netlink_rcv(response)
+  +-- check response:
+      +-- nlmsg_type == NLMSG_ERROR?
+      |   +-- nlmsgerr.error == 0 -> success
+      |   +-- nlmsgerr.error < 0 -> return -errno
+      +-- else -> return raw response
 ```
 
 ### 2.4 rtnetlink 封装（rtnl.c）
@@ -244,19 +244,19 @@ rtnetlink_transaction(h, req, resp) → netlink_transaction(h, req, resp)
 所有 netlink 消息遵循以下结构：
 
 ```
-┌──────────────────────────────┐
-│ struct nlmsghdr               │  ← 消息头
-│   nlmsg_len, nlmsg_type,     │     RTM_NEWLINK / RTM_NEWADDR / ...
-│   nlmsg_flags, nlmsg_seq     │     NLM_F_REQUEST | NLM_F_ACK | ...
-├──────────────────────────────┤
-│ Payload (struct ifinfomsg    │  ← 协议特定头
-│   / ifaddrmsg / rtmsg / ndmsg)│
-├──────────────────────────────┤
-│ Attributes (rtattr chain)    │  ← 属性链
-│   IFLA_IFNAME, IFLA_MTU,    │
-│   IFLA_LINKINFO { nested }, │
-│   ...                        │
-└──────────────────────────────┘
++------------------------------+
+| struct nlmsghdr               |  <- msg hdr
+|   nlmsg_len, nlmsg_type,     |     RTM_NEWLINK / RTM_NEWADDR / ...
+|   nlmsg_flags, nlmsg_seq     |     NLM_F_REQUEST | NLM_F_ACK | ...
++------------------------------+
+| Payload (struct ifinfomsg    |  <- protocol hdr
+|   / ifaddrmsg / rtmsg / ndmsg)|
++------------------------------+
+| Attributes (rtattr chain)    |  <- attr chain
+|   IFLA_IFNAME, IFLA_MTU,    |
+|   IFLA_LINKINFO { nested }, |
+|   ...                        |
++------------------------------+
 ```
 
 ### 3.2 各操作的 Netlink 消息构造
@@ -270,18 +270,18 @@ payload: struct ifinfomsg { ifi_family = AF_UNSPEC }
 
 attributes:
   IFLA_LINKINFO (nested)
-  ├── IFLA_INFO_KIND = "veth"
-  └── IFLA_INFO_DATA (nested)
-      └── VETH_INFO_PEER (nested)
-          ├── struct ifinfomsg { ... }    ← 对端信息头
-          ├── IFLA_IFNAME = name2         ← 对端接口名
-          ├── IFLA_NUM_RX_QUEUES = n_rxqueues  (可选)
-          ├── IFLA_NUM_TX_QUEUES = n_txqueues  (可选)
-          ├── IFLA_MTU = mtu              (可选)
-          └── IFLA_NET_NS_PID = pid       (可选，直接创建到目标 netns)
-  IFLA_IFNAME = name1                    ← 本端接口名
-  IFLA_NUM_RX_QUEUES = n_rxqueues        (可选)
-  IFLA_NUM_TX_QUEUES = n_txqueues        (可选)
+  +-- IFLA_INFO_KIND = "veth"
+  +-- IFLA_INFO_DATA (nested)
+      +-- VETH_INFO_PEER (nested)
+          +-- struct ifinfomsg { ... }    <- peer info hdr
+          +-- IFLA_IFNAME = name2         <- peer ifname
+          +-- IFLA_NUM_RX_QUEUES = n_rxqueues  (optional)
+          +-- IFLA_NUM_TX_QUEUES = n_txqueues  (optional)
+          +-- IFLA_MTU = mtu              (optional)
+          +-- IFLA_NET_NS_PID = pid       (optional, create directly in target netns)
+  IFLA_IFNAME = name1                    <- local ifname
+  IFLA_NUM_RX_QUEUES = n_rxqueues        (optional)
+  IFLA_NUM_TX_QUEUES = n_txqueues        (optional)
 ```
 
 #### 创建 macvlan（`lxc_macvlan_create`）
@@ -293,11 +293,11 @@ payload: struct ifinfomsg { ifi_family = AF_UNSPEC }
 
 attributes:
   IFLA_IFNAME = name
-  IFLA_LINK = if_nametoindex(parent)     ← 父接口
+  IFLA_LINK = if_nametoindex(parent)     <- parent if
   IFLA_LINKINFO (nested)
-  ├── IFLA_INFO_KIND = "macvlan"
-  └── IFLA_INFO_DATA (nested)
-      └── IFLA_MACVLAN_MODE = mode       ← bridge/vepa/private/passthru
+  +-- IFLA_INFO_KIND = "macvlan"
+  +-- IFLA_INFO_DATA (nested)
+      +-- IFLA_MACVLAN_MODE = mode       <- bridge/vepa/private/passthru
 ```
 
 #### 创建 ipvlan
@@ -311,10 +311,10 @@ attributes:
   IFLA_IFNAME = name
   IFLA_LINK = if_nametoindex(parent)
   IFLA_LINKINFO (nested)
-  ├── IFLA_INFO_KIND = "ipvlan"
-  └── IFLA_INFO_DATA (nested)
-      ├── IFLA_IPVLAN_MODE = mode        ← l2/l3/l3s
-      └── IFLA_IPVLAN_ISOLATION = isolation  (可选)
+  +-- IFLA_INFO_KIND = "ipvlan"
+  +-- IFLA_INFO_DATA (nested)
+      +-- IFLA_IPVLAN_MODE = mode        <- l2/l3/l3s
+      +-- IFLA_IPVLAN_ISOLATION = isolation  (optional)
 ```
 
 #### 重命名接口（`lxc_netdev_rename_by_index`，`network.c:2034-2071`）
@@ -336,8 +336,8 @@ RTM_NEWLINK | NLM_F_REQUEST | NLM_F_ACK
 payload: struct ifinfomsg {
     ifi_family = AF_UNSPEC
     ifi_index = ifindex
-    ifi_change = IFF_UP       ← 变更掩码
-    ifi_flags = IFF_UP / 0    ← UP 或 DOWN
+    ifi_change = IFF_UP       <- change mask
+    ifi_flags = IFF_UP / 0    <- UP or DOWN
 }
 ```
 
@@ -360,10 +360,10 @@ RTM_NEWLINK | NLM_F_REQUEST | NLM_F_ACK
 payload: struct ifinfomsg { ifi_family = AF_UNSPEC, ifi_index = ifindex }
 
 attributes:
-  IFLA_NET_NS_PID = pid       ← 按 PID 移动
-  或
-  IFLA_NET_NS_FD = fd         ← 按 fd 移动
-  IFLA_IFNAME = newname       ← 可选，移动时重命名
+  IFLA_NET_NS_PID = pid       <- move by PID
+  or
+  IFLA_NET_NS_FD = fd         <- move by fd
+  IFLA_IFNAME = newname       <- optional, rename on move
 ```
 
 #### 添加 IP 地址（`ip_addr_add`，`network.c:2738-2790`）
@@ -381,7 +381,7 @@ payload: struct ifaddrmsg {
 attributes:
   IFA_LOCAL = addr
   IFA_ADDRESS = addr
-  IFA_BROADCAST = bcast       ← 仅 IPv4
+  IFA_BROADCAST = bcast       <- IPv4 only
 ```
 
 #### 添加路由（`lxc_ip_route_dest`，`network.c:123-168`）
@@ -431,11 +431,11 @@ payload: struct ifinfomsg {
 
 attributes:
   IFLA_AF_SPEC (nested)
-  ├── IFLA_BRIDGE_FLAGS = BRIDGE_FLAGS_MASTER
-  └── IFLA_BRIDGE_VLAN_INFO = {
+  +-- IFLA_BRIDGE_FLAGS = BRIDGE_FLAGS_MASTER
+  +-- IFLA_BRIDGE_VLAN_INFO = {
         vid = vlan_id,
         flags = BRIDGE_VLAN_INFO_PVID | BRIDGE_VLAN_INFO_UNTAGGED  (untagged)
-              或 0  (tagged)
+              or 0  (tagged)
       }
 ```
 

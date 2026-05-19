@@ -83,17 +83,17 @@ struct lxc_cmd_rsp {
 ## 3. 通信架构
 
 ```
-┌────────────────┐                    ┌────────────────────┐
-│  客户端进程      │                    │  容器 Monitor 进程   │
-│                │                    │                    │
-│  lxc-info      │   Unix Socket      │  事件循环           │
-│  lxc-stop      │◄──────────────────►│    ↓               │
-│  lxccontainer  │   (abstract)       │  lxc_cmd_accept()  │
-│                │                    │    ↓               │
-│  lxc_cmd()  ───┼──── 发送 req ─────→│  lxc_cmd_process() │
-│                │                    │    ↓               │
-│  ←─────────────┼──── 返回 rsp ──────│  handler()         │
-└────────────────┘                    └────────────────────┘
++----------------+                    +--------------------+
+| Client process |                    | Container monitor  |
+|                |                    | process            |
+| lxc-info       |   Unix socket      | Event loop         |
+| lxc-stop       |<------------------>|   |                |
+| lxccontainer   |   (abstract)       | lxc_cmd_accept()  |
+|                |                    |   |                |
+| lxc_cmd() -----+---- send req ----->| lxc_cmd_process() |
+|                |                    |   |                |
+| <--------------+--- return rsp -----| handler()         |
++----------------+                    +--------------------+
 ```
 
 ### 套接字路径
@@ -262,9 +262,9 @@ lxc_cmd_rsp_recv(fd, rsp) {
 `commands.c:608-640`：
 
 ```
-客户端: lxc_cmd_get_init_pid(name, lxcpath)
-服务端: lxc_cmd_get_init_pid_callback(req, handler)
-  → 返回 handler->pid（容器 init 进程 PID）
+Client: lxc_cmd_get_init_pid(name, lxcpath)
+Server: lxc_cmd_get_init_pid_callback(req, handler)
+  -> return handler->pid (container init PID)
 ```
 
 ### 6.2 获取 init pidfd
@@ -272,9 +272,9 @@ lxc_cmd_rsp_recv(fd, rsp) {
 `commands.c:643-682`：
 
 ```
-客户端: lxc_cmd_get_init_pidfd(name, lxcpath)
-服务端: lxc_cmd_get_init_pidfd_callback(req, handler)
-  → 通过 SCM_RIGHTS 传递 handler->pidfd
+Client: lxc_cmd_get_init_pidfd(name, lxcpath)
+Server: lxc_cmd_get_init_pidfd_callback(req, handler)
+  -> pass handler->pidfd via SCM_RIGHTS
 ```
 
 ### 6.3 停止容器
@@ -282,10 +282,10 @@ lxc_cmd_rsp_recv(fd, rsp) {
 `commands.c:1105-1166`：
 
 ```
-客户端: lxc_cmd_stop(name, lxcpath)
-服务端: lxc_cmd_stop_callback(req, handler)
-  → kill(handler->pid, SIGKILL)
-  → handler->state = STOPPING
+Client: lxc_cmd_stop(name, lxcpath)
+Server: lxc_cmd_stop_callback(req, handler)
+  -> kill(handler->pid, SIGKILL)
+  -> handler->state = STOPPING
 ```
 
 ### 6.4 状态监听
@@ -293,11 +293,11 @@ lxc_cmd_rsp_recv(fd, rsp) {
 `commands.c:1386-1453`：
 
 ```
-客户端: lxc_cmd_add_state_client(name, lxcpath, states_mask)
-服务端: lxc_cmd_add_state_client_callback(req, handler)
-  → 将客户端 fd 加入状态监听列表
-  → 返回 LXC_CMD_KEEP_CLIENT_FD（保持连接）
-  → 当容器状态变化时通知所有监听者
+Client: lxc_cmd_add_state_client(name, lxcpath, states_mask)
+Server: lxc_cmd_add_state_client_callback(req, handler)
+  -> add client fd to state watcher list
+  -> return LXC_CMD_KEEP_CLIENT_FD (keep connection)
+  -> notify all watchers on state change
 ```
 
 ### 6.5 BPF 设备规则添加
@@ -305,10 +305,10 @@ lxc_cmd_rsp_recv(fd, rsp) {
 `commands.c:1455-1506`：
 
 ```
-客户端: lxc_cmd_add_bpf_device_cgroup(name, lxcpath, rule)
-服务端: lxc_cmd_add_bpf_device_cgroup_callback(req, handler)
-  → bpf_cgroup_devices_update(handler->cgroup_ops, rule)
-  → 原子替换 BPF 程序
+Client: lxc_cmd_add_bpf_device_cgroup(name, lxcpath, rule)
+Server: lxc_cmd_add_bpf_device_cgroup_callback(req, handler)
+  -> bpf_cgroup_devices_update(handler->cgroup_ops, rule)
+  -> atomically replace BPF program
 ```
 
 ### 6.6 冻结/解冻
@@ -316,9 +316,9 @@ lxc_cmd_rsp_recv(fd, rsp) {
 `commands.c:1682-1743`：
 
 ```
-客户端: lxc_cmd_freeze(name, lxcpath, timeout)
-服务端: lxc_cmd_freeze_callback(req, handler)
-  → handler->cgroup_ops->freeze(timeout)
+Client: lxc_cmd_freeze(name, lxcpath, timeout)
+Server: lxc_cmd_freeze_callback(req, handler)
+  -> handler->cgroup_ops->freeze(timeout)
 ```
 
 ### 6.7 获取 cgroup 路径
@@ -326,10 +326,10 @@ lxc_cmd_rsp_recv(fd, rsp) {
 `commands.c:940-987`：
 
 ```
-客户端: lxc_cmd_get_cgroup(name, controller, lxcpath)
-服务端: lxc_cmd_get_cgroup_callback(req, handler)
-  → 查找 controller 对应的 hierarchy
-  → 返回 hierarchy->path_con（容器 cgroup 路径）
+Client: lxc_cmd_get_cgroup(name, controller, lxcpath)
+Server: lxc_cmd_get_cgroup_callback(req, handler)
+  -> find hierarchy for controller
+  -> return hierarchy->path_con (container cgroup path)
 ```
 
 ---

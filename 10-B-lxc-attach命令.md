@@ -23,8 +23,8 @@ lxc-attach -n mycontainer --clear-env -- env        # 清除环境变量
 
 ```c
 lxc_attach_main()                                [lxc_attach.c:320-321]
-  └── lxc_arguments_parse(&my_args, argc, argv)
-        └── my_parser() 处理特有选项           [lxc_attach.c:149-260]
+  `-- lxc_arguments_parse(&my_args, argc, argv)
+      `-- my_parser() handles attach-specific options [lxc_attach.c:149-260]
 ```
 
 | 选项 | 含义 |
@@ -68,11 +68,11 @@ else:
 
 ```
 lxcapi_attach()                                  [lxccontainer.c:3985-4000]
-  └── lxc_attach(c, exec_function, exec_payload, options, pid)
+  `-- lxc_attach(c, exec_function, exec_payload, options, pid)
 
 do_lxcapi_attach_run_wait()                      [lxccontainer.c:4002-4022]
-  ├── lxc_attach(c, exec_function, exec_payload, options, &pid)
-  └── lxc_wait_for_pid_status(pid)               // 等待附着进程退出
+  +-- lxc_attach(c, exec_function, exec_payload, options, &pid)
+  `-- lxc_wait_for_pid_status(pid)               // wait for attached process exit
 ```
 
 ---
@@ -89,16 +89,16 @@ do_lxcapi_attach_run_wait()                      [lxccontainer.c:4002-4022]
 2. **第二次 fork + CLONE_PARENT**：创建实际的附着进程，使其父进程为原始调用者（而非中间进程）
 
 ```
-原始进程（父）
-  │
-  ├── fork() → 中间进程（临时）
-  │               ├── setns() 进入所有目标命名空间
-  │               ├── fork(CLONE_PARENT) → 附着进程
-  │               │                          ├── 安全设置
-  │               │                          └── exec(目标命令)
-  │               └── 发送附着进程 PID → 退出
-  │
-  └── waitpid(附着进程)
+original process (parent)
+  |
+  +-- fork() -> intermediate process (transient)
+  |              +-- setns() into all target namespaces
+  |              +-- fork(CLONE_PARENT) -> attached process
+  |              |                        +-- security setup
+  |              |                        `-- exec(target command)
+  |              `-- send attached PID -> exit
+  |
+  `-- waitpid(attached process)
 ```
 
 `CLONE_PARENT` 使附着进程的父进程指向原始进程而非中间进程，这样：
@@ -110,48 +110,48 @@ do_lxcapi_attach_run_wait()                      [lxccontainer.c:4002-4022]
 
 ```
 lxc_attach(c, exec_fn, exec_payload, options, pid)
-  │                                              [attach.c:1437-1824]
-  │
-  ├─1─ 准备上下文
-  │      get_attach_context(options)              [attach.c:470-494]
-  │      → 获取容器 init PID、命名空间 fd、LSM 标签
-  │
-  ├─2─ 准备 seccomp
-  │      fetch_seccomp(ctx)                       [attach.c:1059-1095]
-  │      → 从运行中的容器获取 seccomp 配置
-  │
-  ├─3─ 创建 IPC socketpair
-  │      socketpair(AF_UNIX, SOCK_DGRAM, 0, ipc_sockets)
-  │                                              [attach.c:1503-1540]
-  │
-  ├─4─ 分配终端（如果需要）
-  │      lxc_terminal_create(terminal)
-  │                                              [attach.c:1491-1501]
-  │
-  ├─5─ 第一次 fork → 中间进程
-  │      pid = fork()                             [attach.c:1542]
-  │      │
-  │      └── 中间进程：
-  │            ├── 等待父进程的 cgroup 同步信号
-  │            ├── 关闭敏感 fd
-  │            ├── 进入命名空间（见 4.3）
-  │            │
-  │            ├── 第二次 fork + CLONE_PARENT     [attach.c:1567-1620]
-  │            │     └── 附着进程（grandchild）：
-  │            │           └── do_attach()         [attach.c:1621-1641]
-  │            │
-  │            ├── 通过 IPC 发送附着进程 PID 给父进程
-  │            └── exit()                          [attach.c:1647-1663]
-  │
-  ├─6─ 父进程后续处理                              [attach.c:1674-1803]
-  │      ├── 接收附着进程 PID
-  │      ├── 将附着进程加入 cgroup
-  │      ├── 处理 seccomp notify fd 交换
-  │      ├── LSM 握手
-  │      └── 启动终端主循环（如果有终端）
-  │            或直接 waitpid
-  │
-  └─7─ 返回附着进程 PID
+  |                                              [attach.c:1437-1824]
+  |
+  +--1-- prepare context
+  |      get_attach_context(options)              [attach.c:470-494]
+  |      -> get container init PID, namespace fds, LSM label
+  |
+  +--2-- prepare seccomp
+  |      fetch_seccomp(ctx)                       [attach.c:1059-1095]
+  |      -> get seccomp config from the running container
+  |
+  +--3-- create IPC socketpair
+  |      socketpair(AF_UNIX, SOCK_DGRAM, 0, ipc_sockets)
+  |                                              [attach.c:1503-1540]
+  |
+  +--4-- allocate terminal (if needed)
+  |      lxc_terminal_create(terminal)
+  |                                              [attach.c:1491-1501]
+  |
+  +--5-- first fork -> intermediate process
+  |      pid = fork()                             [attach.c:1542]
+  |      |
+  |      `-- intermediate process:
+  |            +-- wait for parent's cgroup sync signal
+  |            +-- close sensitive fds
+  |            +-- enter namespaces (see 4.3)
+  |            |
+  |            +-- second fork + CLONE_PARENT    [attach.c:1567-1620]
+  |            |   `-- attached process (grandchild):
+  |            |       `-- do_attach()            [attach.c:1621-1641]
+  |            |
+  |            +-- send attached PID to parent over IPC
+  |            `-- exit()                         [attach.c:1647-1663]
+  |
+  +--6-- parent follow-up                         [attach.c:1674-1803]
+  |      +-- receive attached PID
+  |      +-- add attached process to cgroup
+  |      +-- handle seccomp notify fd exchange
+  |      +-- LSM handshake
+  |      `-- start terminal main loop (if terminal exists)
+  |          or waitpid directly
+  |
+  `--7-- return attached PID
 ```
 
 ### 4.3 命名空间进入
@@ -164,17 +164,17 @@ lxc_attach(c, exec_fn, exec_payload, options, pid)
 
 ```c
 __prepare_namespaces_pidfd()                     [attach.c:546-571]
-  └── setns(ctx->init_pidfd, ns_flags)
-        // 一次性进入所有命名空间
+  `-- setns(ctx->init_pidfd, ns_flags)
+        // Enter all namespaces at once
 ```
 
 #### nsfd 路径（传统方式）
 
 ```c
 __prepare_namespaces_nsfd()                      [attach.c:573-615]
-  └── for each namespace in ns_info[]:
+  `-- for each namespace in ns_info[]:
         setns(ctx->ns_fd[i], ns_info[i].clone_flag)
-        // 逐个进入各命名空间
+        // Enter namespaces one by one
 ```
 
 命名空间类型（`ns_info[]` 数组）：
@@ -202,45 +202,45 @@ __prepare_namespaces_nsfd()                      [attach.c:573-615]
 
 ```
 do_attach(ap)                                    [attach.c:1190-1420]
-  │
-  ├─1─ 关闭不需要的 fd
-  │
-  ├─2─ 设置环境变量
-  │      lxc_attach_set_environment()             [attach.c:797-909]
-  │      ├── CLEAR_ENV 模式：清除所有 → 保留指定变量
-  │      ├── 始终设置 container=lxc
-  │      ├── 加载容器 environment / environment_runtime
-  │      └── 应用 --set-var 的额外变量
-  │
-  ├─3─ 丢弃 Capabilities
-  │      drop_capabilities()                      [attach.c:774-795]
-  │      → prctl(PR_CAPBSET_DROP, cap) 逐个丢弃
-  │                                              [attach.c:1208-1214]
-  │
-  ├─4─ 设置 LSM 安全标签
-  │      ctx->lsm_ops->process_label_set(...)     [attach.c:1268-1279]
-  │      → AppArmor: aa_change_profile()
-  │      → SELinux: setexeccon()
-  │
-  ├─5─ 设置 no_new_privs
-  │      prctl(PR_SET_NO_NEW_PRIVS, 1)            [attach.c:1281-1288]
-  │
-  ├─6─ 准备终端
-  │      lxc_terminal_prepare_login(terminal_pts_fd)
-  │                                              [attach.c:1333-1341]
-  │      ├── lxc_make_controlling_terminal()      → ioctl(TIOCSCTTY)
-  │      └── lxc_terminal_set_stdfds()            → dup2(fd, 0/1/2)
-  │
-  ├─7─ 设置 UID/GID
-  │      setuid(uid) / setgid(gid)
-  │
-  ├─8─ 加载 Seccomp
-  │      seccomp_load / notify fd 交换            [attach.c:1358-1368]
-  │
-  └─9─ 执行目标命令
+  |
+  +--1-- close unneeded fds
+  |
+  +--2-- set environment
+  |      lxc_attach_set_environment()             [attach.c:797-909]
+  |      +-- CLEAR_ENV mode: clear all -> keep selected vars
+  |      +-- always set container=lxc
+  |      +-- load container environment / environment_runtime
+  |      `-- apply extra vars from --set-var
+  |
+  +--3-- drop capabilities
+  |      drop_capabilities()                      [attach.c:774-795]
+  |      -> prctl(PR_CAPBSET_DROP, cap) one by one
+  |                                              [attach.c:1208-1214]
+  |
+  +--4-- set LSM security label
+  |      ctx->lsm_ops->process_label_set(...)     [attach.c:1268-1279]
+  |      -> AppArmor: aa_change_profile()
+  |      -> SELinux: setexeccon()
+  |
+  +--5-- set no_new_privs
+  |      prctl(PR_SET_NO_NEW_PRIVS, 1)            [attach.c:1281-1288]
+  |
+  +--6-- prepare terminal
+  |      lxc_terminal_prepare_login(terminal_pts_fd)
+  |                                              [attach.c:1333-1341]
+  |      +-- lxc_make_controlling_terminal()      -> ioctl(TIOCSCTTY)
+  |      `-- lxc_terminal_set_stdfds()            -> dup2(fd, 0/1/2)
+  |
+  +--7-- set UID/GID
+  |      setuid(uid) / setgid(gid)
+  |
+  +--8-- load seccomp
+  |      seccomp_load / notify fd exchange        [attach.c:1358-1368]
+  |
+  `--9-- exec target command
          exec_function(exec_payload)
-         → lxc_attach_run_command()              [attach.c:1827-1846]
-           └── execvp(command->program, command->argv)
+         -> lxc_attach_run_command()              [attach.c:1827-1846]
+            `-- execvp(command->program, command->argv)
 ```
 
 ---
@@ -251,22 +251,22 @@ do_attach(ap)                                    [attach.c:1190-1420]
 
 ```
 lxc_attach_set_environment(options)
-  │
-  ├── CLEAR_ENV 模式：
-  │     ├── clearenv()                            // 清除所有环境变量
-  │     ├── 保留 --keep-var 指定的变量
-  │     ├── 设置 TERM, HOME, USER（从容器 /etc/passwd）
-  │     └── 设置 PATH 默认值
-  │
-  ├── 始终设置：
-  │     container=lxc                             // 标识在容器内
-  │
-  ├── 加载容器配置中的环境变量：
-  │     lxc.environment = KEY=VALUE
-  │     lxc.environment.runtime = KEY=VALUE
-  │
-  └── 应用用户指定的额外变量：
-        --set-var KEY=VALUE
+  |
+  +-- CLEAR_ENV mode:
+  |   +-- clearenv()                              // clear all env vars
+  |   +-- keep vars requested by --keep-var
+  |   +-- set TERM, HOME, USER (from container /etc/passwd)
+  |   `-- set default PATH
+  |
+  +-- always set:
+  |   container=lxc                               // mark execution as inside container
+  |
+  +-- load env vars from container config:
+  |   lxc.environment = KEY=VALUE
+  |   lxc.environment.runtime = KEY=VALUE
+  |
+  `-- apply extra vars from the user:
+      --set-var KEY=VALUE
 ```
 
 ---
@@ -277,8 +277,8 @@ lxc_attach_set_environment(options)
 
 ```
 lxc_terminal_create(terminal)                    [terminal.c:1103-1110]
-  ├── openpty(&ptx, &pty, ...)
-  └── 返回 ptx/pty fd 对
+  +-- openpty(&ptx, &pty, ...)
+  `-- return ptx/pty fd pair
 ```
 
 ### 7.2 I/O 转发
@@ -286,11 +286,13 @@ lxc_terminal_create(terminal)                    [terminal.c:1103-1110]
 父进程启动主循环进行双向 I/O 转发：
 
 ```
-宿主机终端 (stdin/stdout)
-       ↕ 读写
-PTY 主端 (ptx fd)  ←→  主循环  ←→  PTY 从端 (pty fd)
-                                          ↕
-                                   附着进程 (stdin/stdout)
+host terminal (stdin/stdout)
+       ^  I/O  v
+PTY master (ptx fd)  <->  main loop  <->  PTY slave (pty fd)
+                                               ^
+                                               |
+                                               v
+                                        attached process (stdin/stdout)
 ```
 
 主循环使用 epoll/io_uring 监听两端，实现字符级实时转发。
@@ -304,35 +306,35 @@ SIGWINCH 信号用于同步终端窗口大小变化。
 
 ```
 get_attach_context()                             [attach.c:470-494]
-  └── 读取容器 init 进程的 LSM 标签
-        /proc/<pid>/attr/current (AppArmor)
-        /proc/<pid>/attr/current (SELinux)
+  `-- read the LSM label of the container init process
+      /proc/<pid>/attr/current (AppArmor)
+      /proc/<pid>/attr/current (SELinux)
 
 do_attach()
-  └── lsm_ops->process_label_set(label)
-        AppArmor: aa_change_profile(label)
-        SELinux:  setexeccon(label)
+  `-- lsm_ops->process_label_set(label)
+      AppArmor: aa_change_profile(label)
+      SELinux:  setexeccon(label)
 ```
 
 ### 8.2 Capabilities
 
 ```
 drop_capabilities(ctx)                           [attach.c:774-795]
-  └── for cap in 0..CAP_LAST_CAP:
-        if cap 不在保留列表:
-            prctl(PR_CAPBSET_DROP, cap)
+  `-- for cap in 0..CAP_LAST_CAP:
+      if cap is not in the keep list:
+          prctl(PR_CAPBSET_DROP, cap)
 ```
 
 ### 8.3 Seccomp
 
 ```
 fetch_seccomp(ctx)                               [attach.c:1059-1095]
-  └── 从容器的 seccomp notify fd 获取策略
+  `-- get policy from the container seccomp notify fd
 
 do_attach()
-  └── seccomp_load(filter)
-      + 通过 IPC 交换 notify fd（如果使用 seccomp notify）
-                                                 [attach.c:1358-1368, 1773-1780]
+  `-- seccomp_load(filter)
+      + exchange notify fd over IPC (if seccomp notify is in use)
+                                                [attach.c:1358-1368, 1773-1780]
 ```
 
 ---
@@ -342,30 +344,31 @@ do_attach()
 ```
 lxc-attach -n mycontainer -- /bin/bash
 
-1. CLI 解析 → name=mycontainer, command=/bin/bash, 检测终端模式
+1. CLI parse -> name=mycontainer, command=/bin/bash, detect terminal mode
                                                  [lxc_attach.c:321-456]
 
 2. c->attach_run_wait(c, options, "/bin/bash", argv)
                                                  [lxccontainer.c:4002-4022]
 
-3. lxc_attach() → 获取容器 PID/命名空间/LSM/seccomp
+3. lxc_attach() -> get container PID / namespaces / LSM / seccomp
                                                  [attach.c:1471-1540]
 
-4. fork() → 中间进程
-     ├── setns() 进入所有命名空间                  [attach.c:680-700]
-     └── fork(CLONE_PARENT) → 附着进程
+4. fork() -> intermediate process
+     +-- setns() into all namespaces             [attach.c:680-700]
+     `-- fork(CLONE_PARENT) -> attached process
                                                  [attach.c:1567-1620]
 
-5. 附着进程 do_attach()：
-     ├── 设置环境变量                              [attach.c:797-909]
-     ├── 丢弃 capabilities                        [attach.c:774-795]
-     ├── 设置 LSM 标签                             [attach.c:1268-1279]
-     ├── 设置 no_new_privs                         [attach.c:1281-1288]
-     ├── 准备终端（PTY → stdin/stdout/stderr）      [attach.c:1333-1341]
-     └── execvp("/bin/bash", argv)                [attach.c:1827-1846]
+5. Attached process do_attach():
+     +-- set environment                         [attach.c:797-909]
+     +-- drop capabilities                       [attach.c:774-795]
+     +-- set LSM label                           [attach.c:1268-1279]
+     +-- set no_new_privs                        [attach.c:1281-1288]
+     +-- prepare terminal (PTY -> stdin/stdout/stderr)
+                                                [attach.c:1333-1341]
+     `-- execvp("/bin/bash", argv)              [attach.c:1827-1846]
 
-6. 父进程：运行终端主循环，转发 I/O
+6. Parent process: run terminal main loop and forward I/O
                                                  [attach.c:1797-1803]
 
-7. 用户看到 bash 提示符，在容器命名空间中操作
+7. User sees the bash prompt and works inside container namespaces
 ```

@@ -21,8 +21,8 @@ lxc-create -t local -n mycontainer -- -m /path/to/metadata -f /path/to/rootfs.ta
 
 ```c
 lxc_create_main()                               [lxc_create.c:199]
-  ├── lxc_arguments_parse(&my_args, argc, argv)
-  └── my_parser() 处理特有选项              [lxc_create.c:95-139]
+  +-- lxc_arguments_parse(&my_args, argc, argv)
+  `-- my_parser() handles create-specific options [lxc_create.c:95-139]
 ```
 
 | 选项 | 含义 |
@@ -90,44 +90,44 @@ lxcapi_create() / lxcapi_createl()              [lxccontainer.c:2136-2165]
 
 ```
 __lxcapi_create(c, t, bdevtype, specs, flags, argv)
-  │
-  ├─1─ 创建容器目录
-  │      create_container_dir(c)                [lxccontainer.c:1201-1218]
-  │      → mkdir(<lxcpath>/<name>)
-  │
-  ├─2─ 加载默认配置（如果未指定）
-  │      c->load_config(c, lxc_global_config_value("lxc.default_conf"))
-  │                                              [lxccontainer.c:1784-1787]
-  │
-  ├─3─ 创建 partial 标记文件
-  │      create_partial(c)                       [lxccontainer.c:1828-1833]
-  │      → 在容器目录写入临时标记，防止并发创建
-  │
-  ├─4─ fork 子进程创建存储
-  │      pid = fork()                            [lxccontainer.c:1845-1873]
-  │      子进程：
-  │        ├── 如果有 ID 映射，切换到映射身份
-  │        └── storage_create(c, bdevtype, specs)
-  │      父进程：等待子进程退出
-  │
-  ├─5─ 重新加载配置
-  │      c->load_config(c, fname)                [lxccontainer.c:1878-1883]
-  │
-  ├─6─ 运行模板脚本
-  │      create_run_template(c, t, !!(flags & LXC_CREATE_QUIET), argv)
-  │                                              [lxccontainer.c:1885-1886]
-  │
-  ├─7─ 写入配置头部
-  │      prepend_lxc_header(c->configfile, tpath, argv)
-  │                                              [lxccontainer.c:1893-1898]
-  │      → 在配置文件开头插入模板信息、SHA1 校验
-  │
-  ├─8─ 最终重新加载配置
-  │      c->load_config(c, fname)                [lxccontainer.c:1900]
-  │
-  └─9─ 删除 partial 标记
+  |
+  +--1-- create container directory
+  |      create_container_dir(c)                [lxccontainer.c:1201-1218]
+  |      -> mkdir(<lxcpath>/<name>)
+  |
+  +--2-- load default config (if not specified)
+  |      c->load_config(c, lxc_global_config_value("lxc.default_conf"))
+  |                                              [lxccontainer.c:1784-1787]
+  |
+  +--3-- create partial marker file
+  |      create_partial(c)                       [lxccontainer.c:1828-1833]
+  |      -> write a temp marker in the container dir to prevent concurrent create
+  |
+  +--4-- fork child to create storage
+  |      pid = fork()                            [lxccontainer.c:1845-1873]
+  |      child:
+  |        +-- if ID mapping exists, switch to mapped identity
+  |        `-- storage_create(c, bdevtype, specs)
+  |      parent: wait for child exit
+  |
+  +--5-- reload config
+  |      c->load_config(c, fname)                [lxccontainer.c:1878-1883]
+  |
+  +--6-- run template script
+  |      create_run_template(c, t, !!(flags & LXC_CREATE_QUIET), argv)
+  |                                              [lxccontainer.c:1885-1886]
+  |
+  +--7-- write config header
+  |      prepend_lxc_header(c->configfile, tpath, argv)
+  |                                              [lxccontainer.c:1893-1898]
+  |      -> insert template info and SHA1 checksum at file start
+  |
+  +--8-- final config reload
+  |      c->load_config(c, fname)                [lxccontainer.c:1900]
+  |
+  `--9-- remove partial marker
          remove_partial(c)                       [lxccontainer.c:1902]
-         → 容器创建完成
+         -> container creation complete
 ```
 
 ### 3.3 错误处理
@@ -150,12 +150,12 @@ if (创建失败 && 存储是新创建的) {
 
 ```
 storage_create(c, bdevtype, specs)               [storage.c:258-280]
-  ├── 选择后端类型：
-  │     ├── bdevtype == NULL → "best"（自动选择最佳）
-  │     ├── bdevtype == "best" → 尝试 btrfs → dir 的回退链
-  │     └── 明确指定 → 直接使用
-  ├── bdev = storage_init(conf)                  → 创建后端实例
-  └── bdev->ops->create(bdev, name, specs)       → 调用具体后端
+  +-- choose backend type:
+  |   +-- bdevtype == NULL -> "best" (auto-pick best)
+  |   +-- bdevtype == "best" -> try the btrfs -> dir fallback chain
+  |   `-- explicit type -> use directly
+  +-- bdev = storage_init(conf)                  -> create backend instance
+  `-- bdev->ops->create(bdev, name, specs)       -> call the concrete backend
 ```
 
 ### 4.2 各后端实现
@@ -175,21 +175,21 @@ storage_create(c, bdevtype, specs)               [storage.c:258-280]
 
 ```c
 dir_create(bdev, name, specs)                    [dir.c:57-93]
-  ├── 确定 rootfs 路径：<lxcpath>/<name>/rootfs
-  ├── mkdir_p(rootfs_path, 0755)
-  ├── bdev->src = strdup("dir:<rootfs_path>")
-  └── bdev->dest = strdup(rootfs_path)
+  +-- determine rootfs path: <lxcpath>/<name>/rootfs
+  +-- mkdir_p(rootfs_path, 0755)
+  +-- bdev->src = strdup("dir:<rootfs_path>")
+  `-- bdev->dest = strdup(rootfs_path)
 ```
 
 ### 4.4 lvm 后端详解
 
 ```c
 do_lvm_create(path, size, thinpool)              [lvm.c:95-169]
-  ├── 解析 /dev/<vg>/<lv> 路径
-  ├── if thinpool:
-  │     └── execlp("lvcreate", "--thinpool", thinpool, "-V", size, vg, "-n", lv)
-  └── else:
-        └── execlp("lvcreate", "-L", size, vg, "-n", lv)
+  +-- parse /dev/<vg>/<lv> path
+  +-- if thinpool:
+  |   `-- execlp("lvcreate", "--thinpool", thinpool, "-V", size, vg, "-n", lv)
+  `-- else:
+      `-- execlp("lvcreate", "-L", size, vg, "-n", lv)
 ```
 
 ---
@@ -202,25 +202,25 @@ do_lvm_create(path, size, thinpool)              [lvm.c:95-169]
 
 ```
 create_run_template(c, tpath, quiet, argv)       [lxccontainer.c:1288-1605]
-  ├── fork()
-  │     └── 子进程：
-  │           ├── 构建模板参数：
-  │           │     template --path=<lxcpath>/<name>
-  │           │              --name=<name>
-  │           │              --rootfs=<rootfs>
-  │           │              [用户自定义参数]
-  │           │                                  [lxccontainer.c:1390-1449]
-  │           │
-  │           ├── 如果有 user namespace 映射：
-  │           │     包装为 lxc-usernsexec 执行
-  │           │     lxc-usernsexec --mapped-uid <uid>
-  │           │                    --mapped-gid <gid>
-  │           │                    -- template [args...]
-  │           │                                  [lxccontainer.c:1450-1592]
-  │           │
-  │           └── execvp(template, argv)          [lxccontainer.c:1594-1596]
-  │
-  └── 父进程：waitpid() 等待模板完成
+  +-- fork()
+  |   `-- child:
+  |       +-- build template args:
+  |       |   template --path=<lxcpath>/<name>
+  |       |            --name=<name>
+  |       |            --rootfs=<rootfs>
+  |       |            [user custom args]
+  |       |                                  [lxccontainer.c:1390-1449]
+  |       |
+  |       +-- if user namespace mapping exists:
+  |       |   wrap with lxc-usernsexec
+  |       |   lxc-usernsexec --mapped-uid <uid>
+  |       |                  --mapped-gid <gid>
+  |       |                  -- template [args...]
+  |       |                                  [lxccontainer.c:1450-1592]
+  |       |
+  |       `-- execvp(template, argv)          [lxccontainer.c:1594-1596]
+  |
+  `-- parent: waitpid() for template completion
 ```
 
 ### 5.2 模板脚本接口
@@ -242,14 +242,14 @@ create_run_template(c, tpath, quiet, argv)       [lxccontainer.c:1288-1605]
 
 ```
 lxc-download
-  ├── 解析参数（-d distro, -r release, -a arch）  [140-165]
-  ├── 下载镜像缓存                                 [304-405]
-  │     ├── 从镜像服务器获取索引
-  │     ├── 下载 rootfs 压缩包
-  │     └── 解压到 $LXC_ROOTFS
-  ├── 生成容器配置                                  [407-450]
-  │     └── 写入 lxc.uts.name = $LXC_NAME
-  └── 调整所有权（ID 映射场景）                      [452-493]
+  +-- parse args (-d distro, -r release, -a arch) [140-165]
+  +-- download image cache                         [304-405]
+  |   +-- fetch index from the image server
+  |   +-- download the rootfs tarball
+  |   `-- extract into $LXC_ROOTFS
+  +-- generate container config                    [407-450]
+  |   `-- write lxc.uts.name = $LXC_NAME
+  `-- adjust ownership (ID-mapped case)           [452-493]
 ```
 
 ---
@@ -260,13 +260,13 @@ lxc-download
 
 ```
 prepend_lxc_header(configfile, tpath, argv)      [lxccontainer.c:1681-1701]
-  ├── 计算配置文件 SHA1 校验和
-  ├── 在文件开头插入注释头：
-  │     # Template used to create this container: <template>
-  │     # Parameters passed to template: <args>
-  │     # Template script checksum (SHA-1): <sha1>
-  │     # For additional config options, please look at lxc.container.conf(5)
-  └── 追加原始配置内容
+  +-- calculate config file SHA1 checksum
+  +-- insert a comment header at file start:
+  |     # Template used to create this container: <template>
+  |     # Parameters passed to template: <args>
+  |     # Template script checksum (SHA-1): <sha1>
+  |     # For additional config options, please look at lxc.container.conf(5)
+  `-- append original config content
 ```
 
 ---
@@ -275,35 +275,35 @@ prepend_lxc_header(configfile, tpath, argv)      [lxccontainer.c:1681-1701]
 
 ```
 lxc-create -t download -n mycontainer -B dir -- -d ubuntu -r jammy -a amd64
-  │
-  ├── CLI 解析 → template=download, name=mycontainer, bdevtype=dir
-  │                                              [lxc_create.c:199-334]
-  │
-  ├── c->create(c, "download", "dir", &spec, flags, ["-d","ubuntu","-r","jammy","-a","amd64"])
-  │                                              [lxccontainer.c:1755]
-  │
-  ├── 创建 /var/lib/lxc/mycontainer/             [lxccontainer.c:1201]
-  │
-  ├── 加载 /etc/lxc/default.conf                 [lxccontainer.c:1784]
-  │
-  ├── 创建 partial 标记                           [lxccontainer.c:1828]
-  │
-  ├── fork → storage_create("dir")
-  │     └── mkdir /var/lib/lxc/mycontainer/rootfs [dir.c:57]
-  │
-  ├── fork → 运行模板
-  │     └── execvp("lxc-download",
-  │               "--path=/var/lib/lxc/mycontainer",
-  │               "--name=mycontainer",
-  │               "--rootfs=/var/lib/lxc/mycontainer/rootfs",
-  │               "--", "-d", "ubuntu", "-r", "jammy", "-a", "amd64")
-  │           → 下载镜像 → 解压到 rootfs → 写入 config
-  │                                              [lxc-download.in:304-501]
-  │
-  ├── prepend_lxc_header() → 写入模板信息到 config 头部
-  │                                              [lxccontainer.c:1681]
-  │
-  ├── 重新加载最终配置
-  │
-  └── 删除 partial 标记 → 容器就绪
+  |
+  +-- CLI parse -> template=download, name=mycontainer, bdevtype=dir
+  |                                              [lxc_create.c:199-334]
+  |
+  +-- c->create(c, "download", "dir", &spec, flags, ["-d","ubuntu","-r","jammy","-a","amd64"])
+  |                                              [lxccontainer.c:1755]
+  |
+  +-- create /var/lib/lxc/mycontainer/           [lxccontainer.c:1201]
+  |
+  +-- load /etc/lxc/default.conf                 [lxccontainer.c:1784]
+  |
+  +-- create partial marker                      [lxccontainer.c:1828]
+  |
+  +-- fork -> storage_create("dir")
+  |   `-- mkdir /var/lib/lxc/mycontainer/rootfs  [dir.c:57]
+  |
+  +-- fork -> run template
+  |   `-- execvp("lxc-download",
+  |              "--path=/var/lib/lxc/mycontainer",
+  |              "--name=mycontainer",
+  |              "--rootfs=/var/lib/lxc/mycontainer/rootfs",
+  |              "--", "-d", "ubuntu", "-r", "jammy", "-a", "amd64")
+  |       -> download image -> extract to rootfs -> write config
+  |                                              [lxc-download.in:304-501]
+  |
+  +-- prepend_lxc_header() -> write template info to config header
+  |                                              [lxccontainer.c:1681]
+  |
+  +-- reload final config
+  |
+  `-- remove partial marker -> container ready
 ```

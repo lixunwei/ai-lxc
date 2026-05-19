@@ -94,24 +94,24 @@ struct attach_context {
 
 ```
                     lxc_attach() [caller]
-                         │
-                    fork ①
-                    ┌────┴────┐
-                    │         │
-               [parent]   [transient process]
-                    │         │
-                    │    setns() 进入容器 namespace
-                    │         │
-                    │    clone(CLONE_PARENT) ②
-                    │    ┌────┴────┐
-                    │    │         │
-                    │  [transient] [attached process]
-                    │    │         │
-                    │    │    do_attach() → exec
-                    │   exit      │
-                    │             │
-                    └─ waitpid ───┘
-                    (attached process 的 parent 是 caller!)
+                         |
+                    fork 1
+                    +----+----+
+                    |         |
+               [parent]   [transient]
+                    |         |
+                    |    setns() enter container ns
+                    |         |
+                    |    clone(CLONE_PARENT) 2
+                    |    +----+----+
+                    |    |         |
+                    | [transient] [attached proc]
+                    |    |         |
+                    |    |    do_attach() -> exec
+                    |   exit      |
+                    |             |
+                    `- waitpid ---'
+                 (attached proc parent is caller!)
 ```
 
 **为什么需要 CLONE_PARENT？**
@@ -141,14 +141,14 @@ attach.c:1542-1548, 1612-1619
 
 ```
 get_attach_context(container, options)
-  1. 打开 /proc/self 和 /proc/<init_pid>
-  2. 获取 init pidfd（通过 lxc_cmd_get_init_pidfd）
-  3. 验证 pidfd 可用（发送信号 0 测试）
-     如果不可用 → 回退到传统 PID 模式
-  4. 自动检测容器的 namespace 和继承的 namespace
-  5. 解析 init 进程的 /proc/<pid>/status
-     提取：UID、GID、CapBnd（capability bounding set）
-  6. 初始化 LSM 操作和标签
+  1. Open /proc/self and /proc/<init_pid>
+  2. Get init pidfd (via lxc_cmd_get_init_pidfd)
+  3. Validate pidfd availability (send signal 0 test)
+     If unavailable -> fall back to classic PID mode
+  4. Auto-detect container namespaces and inherited namespaces
+  5. Parse /proc/<pid>/status of init process
+     Extract: UID, GID, CapBnd (capability bounding set)
+  6. Init LSM ops and labels
 ```
 
 #### 阶段二：准备 Namespace
@@ -178,9 +178,9 @@ get_attach_context(container, options)
 
 **nsfd 路径**（`__attach_namespaces_nsfd()`）：
 ```c
-// 按顺序逐个 setns：
-// user → mnt → pid → uts → ipc → net → cgroup → time
-// 顺序很重要：user namespace 必须最先进入
+// setns() one by one in order:
+// user -> mnt -> pid -> uts -> ipc -> net -> cgroup -> time
+// Order matters: user namespace must be entered first
 ```
 
 #### 阶段四：安全设置
@@ -189,19 +189,19 @@ get_attach_context(container, options)
 
 ```
 do_attach(payload)
-  1. attach_namespaces()          // 进入容器 namespace
-  2. 接收 LSM label fd            // 从 parent 通过 socket
-  3. 设置附加组
-     ├── LXC_ATTACH_SETGROUPS → setgroups(gids)
-     └── 其他 → 清除或保持
-  4. setgid(target_gid)           // 切换组
-  5. setuid(target_uid)           // 切换用户
-  6. 应用 LSM 标签
+  1. attach_namespaces()          // Enter container ns
+  2. Receive LSM label fd         // From parent via socket
+  3. Set supplementary groups
+     +-- LXC_ATTACH_SETGROUPS -> setgroups(gids)
+     `-- Otherwise -> clear or keep
+  4. setgid(target_gid)           // Switch group
+  5. setuid(target_uid)           // Switch user
+  6. Apply LSM label
      process_label_set_at(label_fd, label)
-  7. PR_SET_NO_NEW_PRIVS          // 防止权限提升
-  8. drop_capabilities()          // 丢弃多余能力
-  9. 设置环境变量
-  10. 执行用户指定的函数或命令
+  7. PR_SET_NO_NEW_PRIVS          // Block privilege escalation
+  8. drop_capabilities()          // Drop extra capabilities
+  9. Set env vars
+ 10. Run user function or command
 ```
 
 #### 阶段五：IPC 与清理
@@ -519,13 +519,13 @@ LXC 不自行实现检查点/恢复，而是作为 CRIU 的"参数生成器"：
 
 ```
 LXC                              CRIU
- │                                 │
- │  构建 criu 命令行参数            │
- │  设置容器状态                    │
- │  execv("criu", args)  ────────→ │
- │                                 │  执行 checkpoint/restore
- │  ←───────────────────────────── │
- │  检查退出状态                    │
+ |                                 |
+ |  Build criu CLI args            |
+ |  Set container state            |
+ |  execv("criu", args) ---------> |
+ |                                 |  Run checkpoint/restore
+ | <------------------------------ |
+ |  Check exit status              |
 ```
 
 ### 5.2 核心实现
@@ -595,44 +595,44 @@ __criu_restore(handler)     // criu.c:1341
 ## 6. 安全机制协作图
 
 ```
-容器启动安全流程:
+container start security flow:
 
-  ┌─────────────────────────────────────────────────┐
-  │                    启动阶段                       │
-  │                                                  │
-  │  1. LSM prepare → 生成/加载安全策略               │
-  │  2. Capabilities init → 设置 ambient caps        │
-  │  3. ID mapping → 写入 uid_map/gid_map            │
-  │  4. User namespace → CLONE_NEWUSER               │
-  │                                                  │
-  ├─────────────────────────────────────────────────┤
-  │                  容器进程内部                      │
-  │                                                  │
-  │  5. Capabilities enforce → drop/keep              │
-  │  6. Seccomp load → 加载系统调用过滤器              │
-  │  7. LSM label → 设置进程安全标签                   │
-  │  8. PR_SET_NO_NEW_PRIVS → 防止权限提升            │
-  │                                                  │
-  ├─────────────────────────────────────────────────┤
-  │                    运行阶段                       │
-  │                                                  │
-  │  9. Seccomp notify → 拦截敏感系统调用             │
-  │ 10. LSM → 强制访问控制                            │
-  │ 11. Capabilities → 权限边界                       │
-  │                                                  │
-  └─────────────────────────────────────────────────┘
+  +-----------------------------------------------+
+  |                  startup phase                 |
+  |                                               |
+  |  1. LSM prepare -> build/load security policy |
+  |  2. Capabilities init -> set ambient caps     |
+  |  3. ID mapping -> write uid_map/gid_map       |
+  |  4. User namespace -> CLONE_NEWUSER           |
+  |                                               |
+  +-----------------------------------------------+
+  |               inside container proc           |
+  |                                               |
+  |  5. Capabilities enforce -> drop/keep         |
+  |  6. Seccomp load -> load syscall filter       |
+  |  7. LSM label -> set process security label   |
+  |  8. PR_SET_NO_NEW_PRIVS -> block priv-esc     |
+  |                                               |
+  +-----------------------------------------------+
+  |                  runtime phase                |
+  |                                               |
+  |  9. Seccomp notify -> intercept syscalls      |
+  | 10. LSM -> mandatory access control           |
+  | 11. Capabilities -> permission boundary       |
+  |                                               |
+  +-----------------------------------------------+
 
-Attach 安全流程:
+attach security flow:
 
-  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-  │  1. 获取目标   │    │  2. 进入      │    │  3. 安全设置  │
-  │     namespace │───→│     namespace │───→│              │
-  │  - pidfd      │    │  - setns()   │    │  - setuid    │
-  │  - ns fds     │    │  - 顺序进入   │    │  - setgid    │
-  │  - caps 检查  │    │              │    │  - LSM label │
-  │              │    │              │    │  - drop caps │
-  │              │    │              │    │  - NO_NEW_PRIVS│
-  └──────────────┘    └──────────────┘    └──────────────┘
+  +--------------+    +--------------+    +----------------+
+  | 1. Get target|    | 2. Enter     |    | 3. Secure setup|
+  |    namespace |--->|    namespace |--->|                |
+  |  - pidfd     |    |  - setns()   |    |  - setuid      |
+  |  - ns fds    |    |  - ordered   |    |  - setgid      |
+  |  - caps check|    |    entry     |    |  - LSM label   |
+  |              |    |              |    |  - drop caps   |
+  |              |    |              |    |  - NO_NEW_PRIVS|
+  +--------------+    +--------------+    +----------------+
 ```
 
 ---

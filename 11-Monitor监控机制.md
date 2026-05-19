@@ -5,10 +5,11 @@
 LXC monitor 子系统提供了一套**发布-订阅 (pub/sub)** 机制，允许外部工具实时监听容器的状态变化和退出码。整体架构由三个组件构成：
 
 ```
-┌─────────────┐     FIFO       ┌──────────────┐   Abstract Unix Socket   ┌─────────────┐
-│  容器进程    │ ──────────────→ │ lxc-monitord │ ─────────────────────────→│ lxc-monitor │
-│ (生产者)    │  写入 lxc_msg  │  (守护进程)   │    广播到所有订阅者      │  (消费者)   │
-└─────────────┘                └──────────────┘                           └─────────────┘
++-------------+     FIFO       +--------------+   Abstract Unix Socket   +-------------+
+| Container   | -------------> | lxc-monitord | -----------------------> | lxc-monitor |
+| process     | write lxc_msg  | daemon       | broadcast to subscribers | client      |
+| (producer)  |                |              |                            | (consumer)  |
++-------------+                +--------------+                            +-------------+
 ```
 
 | 组件 | 角色 | 源文件 |
@@ -102,18 +103,21 @@ struct lxc_monitor {
 ### 3.4 事件循环
 
 ```
-┌─────────────────────────────────────────────┐
-│               epoll 主循环                   │
-│                                             │
-│  fifofd  → lxc_monitord_fifo_handler()      │
-│           读取 lxc_msg，广播给所有 clientfds │
-│                                             │
-│  listenfd → lxc_monitord_sock_accept()      │
-│           accept4() 新连接，验证 uid 权限   │
-│                                             │
-│  clientfd → lxc_monitord_sock_handler()     │
-│           处理 "quit" 命令 或 EPOLLHUP 断连 │
-└─────────────────────────────────────────────┘
++---------------------------------------------+
+|               epoll main loop               |
+|                                             |
+| fifofd   -> lxc_monitord_fifo_handler()     |
+|            read lxc_msg, broadcast to all   |
+|            clientfds                        |
+|                                             |
+| listenfd -> lxc_monitord_sock_accept()      |
+|            accept4() new connection,        |
+|            verify uid permissions           |
+|                                             |
+| clientfd -> lxc_monitord_sock_handler()     |
+|            handle "quit" command or         |
+|            EPOLLHUP disconnect              |
++---------------------------------------------+
 ```
 
 ### 3.5 消息转发逻辑
@@ -179,16 +183,16 @@ lxc-monitor [--name=NAME] [-Q|--quit]
 ### 4.3 工作流程
 
 ```
-1. 解析参数
-2. 编译 name 为正则表达式 (regcomp)
-3. 对每个 lxcpath:
-   a. 启动/确认 lxc-monitord 运行
-   b. lxc_monitor_open() 连接 abstract unix socket
-4. 进入主循环:
-   a. poll() 等待消息
-   b. 读取 struct lxc_msg
-   c. regexec() 过滤容器名
-   d. 打印状态变化或退出码
+1. parse args
+2. compile name as a regular expression (regcomp)
+3. for each lxcpath:
+   a. start/confirm lxc-monitord is running
+   b. lxc_monitor_open() connects to the abstract unix socket
+4. enter main loop:
+   a. poll() waits for messages
+   b. read struct lxc_msg
+   c. regexec() filters the container name
+   d. print state changes or exit code
 ```
 
 ### 4.4 输出格式
@@ -217,25 +221,25 @@ for (i = 0; i < nfds; i++) {
 ## 5. 启动时序图
 
 ```
-lxc-monitor                    lxc-monitord                     容器进程
-    │                               │                              │
-    │── fork()/fork() ──────────────│                              │
-    │                        setsid()                              │
-    │                        创建 FIFO                             │
-    │                        创建 socket                           │
-    │◄── pipe 同步 ─────────────────│                              │
-    │                               │                              │
-    │── connect(socket) ───────────→│                              │
-    │                        accept4() + 权限检查                  │
-    │                               │                              │
-    │                               │◄── FIFO write ───────────── │ lxc_monitor_send_state()
-    │                               │    (lxc_msg: state=RUNNING)  │
-    │                               │                              │
-    │◄── socket write ──────────────│                              │
-    │   (广播 lxc_msg)              │                              │
-    │                               │                              │
-    │ printf("changed state")       │                              │
-    │                               │                              │
+lxc-monitor                    lxc-monitord                     container process
+    |                               |                              |
+    |-- fork()/fork() ------------->|                              |
+    |                        setsid()                              |
+    |                        create FIFO                           |
+    |                        create socket                         |
+    |<-- pipe sync -----------------|                              |
+    |                               |                              |
+    |-- connect(socket) ----------->|                              |
+    |                        accept4() + uid check                |
+    |                               |                              |
+    |                               |<-- FIFO write ------------- | lxc_monitor_send_state()
+    |                               |    (lxc_msg: state=RUNNING) |
+    |                               |                              |
+    |<-- socket write --------------|                              |
+    |   (broadcast lxc_msg)         |                              |
+    |                               |                              |
+    | printf("changed state")       |                              |
+    |                               |                              |
 ```
 
 ---

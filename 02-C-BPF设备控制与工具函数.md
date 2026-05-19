@@ -144,19 +144,19 @@ exit
 ### 3.4 生成的完整程序结构
 
 ```
-┌─────────────────────────┐
-│  解码上下文（5 条指令）    │  从 ctx 提取 r2-r5
-├─────────────────────────┤
-│  规则 1：条件跳转链       │  匹配则返回 allow/deny
-├─────────────────────────┤
-│  规则 2：条件跳转链       │
-├─────────────────────────┤
-│  ...                    │
-├─────────────────────────┤
-│  规则 N：条件跳转链       │
-├─────────────────────────┤
-│  默认策略返回（2 条指令）  │  返回 ALLOWLIST/DENYLIST
-└─────────────────────────┘
++-------------------------+
+|  decode ctx(5 insns)    |  extract r2-r5 from ctx
++-------------------------+
+|  rule 1:conditional jump chain       |  return on match allow/deny
++-------------------------+
+|  rule 2:conditional jump chain       |
++-------------------------+
+|  ...                    |
++-------------------------+
+|  rule N:conditional jump chain       |
++-------------------------+
+|  default policy return(2 insns)  |  return ALLOWLIST/DENYLIST
++-------------------------+
 ```
 
 ---
@@ -256,10 +256,10 @@ bpf_program_cgroup_attach(prog, attach_type, fd_cgroup, flags)
 
 ```
 bpf_cgroup_devices_attach(ops, bpf_devices)
-  1. __bpf_cgroup_devices()  → 构建完整 BPF 程序
-  2. attach 到 ops->unified->dfd_lim（limit cgroup）
+  1. __bpf_cgroup_devices()  -> build full BPF program
+  2. attach to ops->unified->dfd_lim(limit cgroup)
   3. flags = BPF_F_ALLOW_MULTI
-  4. swap(prog, ops->cgroup2_devices)  → 保存程序引用
+  4. swap(prog, ops->cgroup2_devices)  -> save program ref
 ```
 
 ### 5.4 动态更新
@@ -268,19 +268,19 @@ bpf_cgroup_devices_attach(ops, bpf_devices)
 
 ```
 bpf_cgroup_devices_update(ops, bpf_devices, new_rule)
-  1. bpf_list_add_device()        → 更新规则集合
-  2. if (之前没有挂过程序):
-       bpf_cgroup_devices_attach()  → 首次挂载
+  1. bpf_list_add_device()        -> update rule set
+  2. if (no program attached before):
+       bpf_cgroup_devices_attach()  -> first attach
        return
-  3. 重新生成 BPF 程序
-  4. bpf_program_load_kernel()     → 加载新程序
-  5. 尝试原子替换：
+  3. rebuild BPF program
+  4. bpf_program_load_kernel()     -> load new program
+  5. try atomic replace:
        attr.attach_flags = BPF_F_REPLACE | BPF_F_ALLOW_MULTI
        attr.replace_bpf_fd = old->kernel_fd
        bpf(BPF_PROG_ATTACH, ...)
-  6. if (内核不支持 REPLACE):
-       退化为 BPF_F_ALLOW_MULTI（追加）
-  7. 更新 ops->cgroup2_devices
+  6. if (kernel lacks REPLACE):
+       fallback to BPF_F_ALLOW_MULTI(append)
+  7. update ops->cgroup2_devices
 ```
 
 **BPF_F_REPLACE** 是 Linux 5.5+ 引入的特性，允许原子替换已挂载的 BPF 程序，避免短暂的策略缺失窗口。
@@ -295,17 +295,17 @@ bpf_cgroup_devices_update(ops, bpf_devices, new_rule)
 
 ```
 bpf_devices_cgroup_supported()
-  1. 检查 geteuid() == 0（必须 root）
-  2. 检查 bpf 系统调用可用：
+  1. check geteuid() == 0(must be root)
+  2. check bpf syscall available:
      bpf(BPF_PROG_LOAD, NULL, sizeof(attr))
-     若 errno == ENOSYS → 不支持
-  3. 构造最小测试程序：
-     r0 = 1; exit    // 最简单的合法 BPF 程序
-  4. 尝试加载：
+     if errno == ENOSYS -> unsupported
+  3. build minimal test program:
+     r0 = 1; exit    // smallest valid BPF program
+  4. try load:
      bpf_program_init()
      bpf_program_add_instructions(test_insns)
      bpf_program_load_kernel()
-  5. 成功加载 → 支持
+  5. load succeeds -> supports
 ```
 
 ---
@@ -385,9 +385,9 @@ char *prune_init_scope(char *path) {
 v1 冻结使用 `freezer.state` 伪文件：
 
 ```
-状态机：
-  THAWED ──写"FROZEN"──→ FREEZING ──（内核完成）──→ FROZEN
-  FROZEN ──写"THAWED"──→ THAWED
+state machine:
+  THAWED --write"FROZEN"---> FREEZING --(kernel completes)---> FROZEN
+  FROZEN --write"THAWED"---> THAWED
 ```
 
 LXC 写入目标状态后，需要循环轮询直到实际状态生效：
@@ -429,26 +429,26 @@ lxc_freeze() {
 ## 9. 与 cgfsng 的集成关系
 
 ```
-                    ┌──────────────────┐
-                    │   confile.c      │
-                    │ 配置解析         │
-                    │ lxc.cgroup2.*   │
-                    └────────┬─────────┘
-                             │
-                    ┌────────▼─────────┐
-                    │   cgfsng.c       │
-                    │ setup_limits()   │
-                    │ devices_activate │
-                    └────────┬─────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-    ┌─────────▼────┐  ┌──────▼──────┐  ┌───▼──────────┐
-    │ 普通控制器    │  │ BPF 设备控制 │  │ commands.c   │
-    │ 直接写文件    │  │ 编译+加载    │  │ 运行时更新    │
-    │ memory.max  │  │ BPF 程序     │  │ 命令通道      │
-    │ cpu.max     │  │ attach       │  │ BPF_F_REPLACE │
-    └──────────────┘  └─────────────┘  └──────────────┘
+                    +------------------+
+                    |   confile.c      |
+                    | config parse         |
+                    | lxc.cgroup2.*   |
+                    +--------+---------+
+                             |
+                    +--------v---------+
+                    |   cgfsng.c       |
+                    | setup_limits()   |
+                    | devices_activate |
+                    +--------+---------+
+                             |
+              +--------------+--------------+
+              |              |              |
+    +---------v----+  +------v------+  +---v----------+
+    | Normal ctrls    |  | BPF device ctl |  | commands.c   |
+    | write files directly    |  | build+load    |  | runtime update    |
+    | memory.max  |  | BPF program     |  | cmd channel      |
+    | cpu.max     |  | attach       |  | BPF_F_REPLACE |
+    +--------------+  +-------------+  +--------------+
 ```
 
 **启动时**：cgfsng 通过 `setup_limits()` + `devices_activate()` 一次性编译并挂载 BPF 程序。
